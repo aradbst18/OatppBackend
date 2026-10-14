@@ -1,0 +1,69 @@
+BasedOnStyle: Google
+Language: Cpp
+# Repository standard: 4-space indent, 100-column soft limit.
+# Matches docs/coding-standards.md and docs/code-style.md.
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+BracedInitializerIndentWidth: 4
+ColumnLimit: 150
+# Google default (80) is too tight for oatpp type names; 100 is the
+# documented soft limit. Penalty tuning keeps the formatter from
+# packing too aggressively.
+PenaltyBreakBeforeFirstCallParameter: 19
+PenaltyBreakComment: 300
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 1000000
+# Pointer/reference placement: `const char*`, `const std::string&`.
+# This matches the existing codebase. NOTE: in clang-format terminology
+# `Left` means `int* a` (star attached to the type).
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+# Braces: Allman (opening brace on its own line), matching the documented
+# class/function/control-flow layout. Verified against clang-format 23.1.3.
+BreakBeforeBraces: Allman
+AccessModifierOffset: -4
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortLambdasOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+# Includes: keep existing grouping (own header, stdlib, third-party,
+# project). clang-format sorts within blocks; it never merges blocks
+# separated by blank lines, so the documented grouping is preserved.
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+    - Regex: '^"app/.*\.hpp"'
+      Priority: 4
+    - Regex: '^<.*>$'
+      Priority: 2
+    - Regex: '.*'
+      Priority: 3
+# Namespace formatting: no indent inside `namespace app::x {`.
+NamespaceIndentation: None
+FixNamespaceComments: true
+# Other readability settings aligned with C++ Core Guidelines / Google.
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: true
+BinPackParameters: true
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments:
+    Kind: Always
+    OverEmptyLines: 2
+ReflowComments: false
+SpaceBeforeParens: ControlStatements
+SpacesInAngles: false
+SpaceInEmptyParentheses: false
+SpacesInContainerLiterals: false
+Standard: c++17
+---
+# Exclude generated / vendored trees. clang-format still visits them if
+# invoked recursively, so callers must pass the exclusion (see
+# docs/code-style.md). This document is the source of truth.
+Language: Proto
+DisableFormat: true

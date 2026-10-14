@@ -1,0 +1,358 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/out",
+                "APP_ENABLE_ZLIB": true,
+                "APP_PASSWORD_HASH_ALGO": "SHA512",
+                "APP_ENABLE_JSON_PARSER": true,
+                "APP_ENABLE_TOML_PARSER": true,
+                "APP_ENABLE_XML_PARSER": true,
+                "APP_ENABLE_YAML_PARSER": true,
+                "APP_DATABASE_BACKEND": "SQLCIPHER",
+                "APP_CONFIG_FORMAT": "TOML",
+                "APP_VERSION": "0.0.1",
+                "APP_RELEASE_DATE": "",
+                "APP_VERSION_FILE_FORMAT": "JSON",
+                "VERBOSE_BUILD_SUMMARY": true
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug + ASan/UBSan (largest)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "debug-tsan",
+            "displayName": "Debug + ThreadSanitizer",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "DebugTSan",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "debug-msan",
+            "displayName": "Debug + MemorySanitizer (Clang only)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "DebugMSan",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "relwithdebinfo",
+            "displayName": "RelWithDebInfo + ASan/UBSan",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "relwithdebinfo-tsan",
+            "displayName": "RelWithDebInfo + ThreadSanitizer",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfoTSan",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "relwithdebinfo-msan",
+            "displayName": "RelWithDebInfo + MemorySanitizer (Clang only)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfoMSan",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": true
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release, sanitizers disabled by policy (balanced)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "APP_BUILD_TESTS": false,
+                "APP_ENABLE_SWAGGER": false,
+                "ENABLE_SANITIZERS": false
+            }
+        },
+        {
+            "name": "minsizerel",
+            "displayName": "MinSizeRel, sanitizers disabled by policy (smallest)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
+                "APP_BUILD_TESTS": false,
+                "APP_ENABLE_SWAGGER": false,
+                "ENABLE_SANITIZERS": false
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "displayName": "Build: Debug",
+            "configurePreset": "debug",
+            "jobs": 2
+        },
+        {
+            "name": "debug-tsan",
+            "displayName": "Build: DebugTSan",
+            "configurePreset": "debug-tsan",
+            "jobs": 2
+        },
+        {
+            "name": "debug-msan",
+            "displayName": "Build: DebugMSan",
+            "configurePreset": "debug-msan",
+            "jobs": 2
+        },
+        {
+            "name": "relwithdebinfo",
+            "displayName": "Build: RelWithDebInfo",
+            "configurePreset": "relwithdebinfo",
+            "jobs": 2
+        },
+        {
+            "name": "relwithdebinfo-tsan",
+            "displayName": "Build: RelWithDebInfoTSan",
+            "configurePreset": "relwithdebinfo-tsan",
+            "jobs": 2
+        },
+        {
+            "name": "relwithdebinfo-msan",
+            "displayName": "Build: RelWithDebInfoMSan",
+            "configurePreset": "relwithdebinfo-msan",
+            "jobs": 2
+        },
+        {
+            "name": "release",
+            "displayName": "Build: Release",
+            "configurePreset": "release",
+            "jobs": 2
+        },
+        {
+            "name": "minsizerel",
+            "displayName": "Build: MinSizeRel",
+            "configurePreset": "minsizerel",
+            "jobs": 2
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "displayName": "Test: Debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "debug-tsan",
+            "displayName": "Test: DebugTSan",
+            "configurePreset": "debug-tsan",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "debug-msan",
+            "displayName": "Test: DebugMSan",
+            "configurePreset": "debug-msan",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "relwithdebinfo",
+            "displayName": "Test: RelWithDebInfo",
+            "configurePreset": "relwithdebinfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "relwithdebinfo-tsan",
+            "displayName": "Test: RelWithDebInfoTSan",
+            "configurePreset": "relwithdebinfo-tsan",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "relwithdebinfo-msan",
+            "displayName": "Test: RelWithDebInfoMSan",
+            "configurePreset": "relwithdebinfo-msan",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "debug",
+            "displayName": "Configure, build, and test: Debug",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "debug"
+                },
+                {
+                    "type": "build",
+                    "name": "debug"
+                },
+                {
+                    "type": "test",
+                    "name": "debug"
+                }
+            ]
+        },
+        {
+            "name": "debug-tsan",
+            "displayName": "Configure, build, and test: DebugTSan",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "debug-tsan"
+                },
+                {
+                    "type": "build",
+                    "name": "debug-tsan"
+                },
+                {
+                    "type": "test",
+                    "name": "debug-tsan"
+                }
+            ]
+        },
+        {
+            "name": "debug-msan",
+            "displayName": "Configure, build, and test: DebugMSan (Clang only)",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "debug-msan"
+                },
+                {
+                    "type": "build",
+                    "name": "debug-msan"
+                },
+                {
+                    "type": "test",
+                    "name": "debug-msan"
+                }
+            ]
+        },
+        {
+            "name": "relwithdebinfo",
+            "displayName": "Configure, build, and test: RelWithDebInfo",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "relwithdebinfo"
+                },
+                {
+                    "type": "build",
+                    "name": "relwithdebinfo"
+                },
+                {
+                    "type": "test",
+                    "name": "relwithdebinfo"
+                }
+            ]
+        },
+        {
+            "name": "relwithdebinfo-tsan",
+            "displayName": "Configure, build, and test: RelWithDebInfoTSan",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "relwithdebinfo-tsan"
+                },
+                {
+                    "type": "build",
+                    "name": "relwithdebinfo-tsan"
+                },
+                {
+                    "type": "test",
+                    "name": "relwithdebinfo-tsan"
+                }
+            ]
+        },
+        {
+            "name": "relwithdebinfo-msan",
+            "displayName": "Configure, build, and test: RelWithDebInfoMSan (Clang only)",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "relwithdebinfo-msan"
+                },
+                {
+                    "type": "build",
+                    "name": "relwithdebinfo-msan"
+                },
+                {
+                    "type": "test",
+                    "name": "relwithdebinfo-msan"
+                }
+            ]
+        },
+        {
+            "name": "release",
+            "displayName": "Configure and build: Release (no tests in Release)",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "release"
+                },
+                {
+                    "type": "build",
+                    "name": "release"
+                }
+            ]
+        },
+        {
+            "name": "minsizerel",
+            "displayName": "Configure and build: MinSizeRel (no tests in MinSizeRel)",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "minsizerel"
+                },
+                {
+                    "type": "build",
+                    "name": "minsizerel"
+                }
+            ]
+        }
+    ]
+}

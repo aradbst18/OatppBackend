@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<app>
+    <server>
+        <host>127.0.0.1</host>
+        <port>8080</port>
+    </server>
+    <database>
+        <path>data/app.db</path>
+        <key>dev-sqlcipher-key-change-me</key>
+    </database>
+    <jwt>
+        <secret>change-me-in-production</secret>
+        <issuer>oatpp-backend</issuer>
+        <ttlSeconds>3600</ttlSeconds>
+    </jwt>
+    <logging>
+        <level>INFO</level>
+        <filePath>logs</filePath>
+    </logging>
+    <swagger>
+        <resPath>/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res</resPath>
+    </swagger>
+</app>

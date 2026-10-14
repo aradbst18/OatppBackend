@@ -1,68 +1,85 @@
-# Prerequisites
-*.d
+# ── Build trees ─────────────────────────────────────────────────────
+# Per-preset build/<name>/ dirs, the test-matrix scratch trees under
+# build/matrix/, and vendored in-source build/ dirs (a bare pattern
+# matches a directory of that name at every level; [Bb] covers both
+# casings in one line).
+[Bb]uild/
+[Bb]uild-*/
 
-# Compiled Object files
-*.slo
-*.lo
+# ── CMake in-source configure artifacts ─────────────────────────────
+# Only produced if you ever configure without -B; normal builds live
+# under build/ (ignored above). CMakeUserPresets.json is the local
+# developer overlay (personal Ninja/generator choices) and is never
+# committed; CMakePresets.json holds the shared presets.
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+[Mm]akefile
+CTestTestfile.cmake
+DartConfiguration.tcl
+Testing/
+*.ninja
+.ninja_*
+
+# ── Compiled objects & dependency files ─────────────────────────────
+# -MD dependency outputs (*.d) sit next to objects on in-source builds.
 *.o
 *.obj
+*.slo
+*.lo
+*.d
 
-# Precompiled Headers
+# ── Precompiled headers ─────────────────────────────────────────────
 *.gch
 *.pch
 
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
+# ── Libraries (static & shared) ─────────────────────────────────────
+# Compiler outputs only; already-tracked files (e.g. under external/)
+# stay tracked — gitignore never untracks.
 *.a
 *.lib
+*.la
+*.lai
+*.so
+*.so.*
+*.dylib
+*.dll
 
-# Executables
+# ── Executables ─────────────────────────────────────────────────────
 *.exe
 *.out
 *.app
 
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
+# ── Linker & debug-symbol artifacts ─────────────────────────────────
+# MSVC (*.ilk, *.pdb), GCC split-DWARF (*.dwo).
+*.ilk
+*.pdb
 *.dwo
 
-# test output & cache
-Testing/
+# ── Other toolchain artifacts ───────────────────────────────────────
+# Fortran modules (upstream template parity; no Fortran in this tree).
+*.mod
+*.smod
+
+# ── Runtime-generated files ─────────────────────────────────────────
+# Created by the app on first startup/run; never commit these. The
+# checked-in samples (configs/app.{json,toml,xml,yaml}) stay tracked.
+configs/app.conf
+configs/version.conf
+data/
+logs/
+*.log
+
+# ── Editor & temporary leftovers ────────────────────────────────────
+compile_commands.json
+*~
+*.tmp
+*.bak
+*.swp
+.DS_Store
+
+# ── Package-manager & cache directories ─────────────────────────────
+vcpkg_installed/
 .cache/

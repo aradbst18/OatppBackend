@@ -1,0 +1,2 @@
+$ sudo mv ttyd.[version] /usr/local/bin/ttyd
+$ sudo chmod +x /usr/local/bin/ttyd

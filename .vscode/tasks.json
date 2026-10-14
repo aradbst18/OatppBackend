@@ -1,0 +1,782 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Format: C/C++ (clang-format)",
+            "type": "shell",
+            "command": "find src include tests -type f \\( -name '*.c' -o -name '*.h' -o -name '*.cc' -o -name '*.hh' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.cxx' -o -name '*.hxx' \\) -exec clang-format --style=file -i {} +",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "${userHome}/.local/bin:${env:PATH}"
+                }
+            },
+            "problemMatcher": [],
+            "detail": "Format all C/C++ sources and headers in src, include, and tests using .clang-format."
+        },
+        {
+            "label": "Format: CMake (cmake-format)",
+            "type": "shell",
+            "command": "cmake-format -i CMakeLists.txt cmake/*.cmake tests/CMakeLists.txt",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PATH": "${userHome}/.local/bin:${env:PATH}"
+                }
+            },
+            "problemMatcher": [],
+            "detail": "Format CMakeLists.txt, cmake/*.cmake and tests/CMakeLists.txt using .cmake-format.yaml."
+        },
+        {
+            "label": "Format: All",
+            "type": "shell",
+            "command": "echo 'Use Ctrl+Shift+B / Run Task to run Format: C/C++ and Format: CMake'",
+            "dependsOn": [
+                "Format: C/C++ (clang-format)",
+                "Format: CMake (cmake-format)"
+            ],
+            "problemMatcher": [],
+            "detail": "Run every formatter (C/C++ + CMake) for the whole project."
+        },
+        {
+            "label": "Preset: Configure (debug)",
+            "type": "shell",
+            "command": "cmake --preset debug",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (debug)",
+            "type": "shell",
+            "command": "cmake --build --preset debug",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (debug)",
+            "type": "shell",
+            "command": "ctest --preset debug",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug)"
+            ],
+            "problemMatcher": [],
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (debug)",
+            "type": "shell",
+            "command": "cmake --install build/debug",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug/out"
+        },
+        {
+            "label": "Preset: Workflow (debug)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Configure (debug-tsan)",
+            "type": "shell",
+            "command": "cmake --preset debug-tsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Build (debug-tsan)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-tsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-tsan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Test (debug-tsan)",
+            "type": "shell",
+            "command": "ctest --preset debug-tsan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-tsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Install (debug-tsan)",
+            "type": "shell",
+            "command": "cmake --install build/debug-tsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-tsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-tsan/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-tsan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-tsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Configure (debug-msan)",
+            "type": "shell",
+            "command": "cmake --preset debug-msan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Build (debug-msan)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-msan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-msan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Test (debug-msan)",
+            "type": "shell",
+            "command": "ctest --preset debug-msan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-msan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Install (debug-msan)",
+            "type": "shell",
+            "command": "cmake --install build/debug-msan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-msan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-msan/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-msan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-msan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo)"
+            ],
+            "problemMatcher": [],
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-tsan)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-tsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-tsan)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-tsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-tsan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-tsan)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-tsan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-tsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-tsan)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-tsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-tsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-tsan/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-tsan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-tsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-msan)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-msan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-msan)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-msan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-msan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-msan)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-msan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-msan)"
+            ],
+            "problemMatcher": [],
+            "detail": "RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-msan)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-msan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-msan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-msan/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-msan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-msan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Configure (release)",
+            "type": "shell",
+            "command": "cmake --preset release",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Build (release)",
+            "type": "shell",
+            "command": "cmake --build --preset release",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (release)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Install (release)",
+            "type": "shell",
+            "command": "cmake --install build/release",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (release)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/release/out"
+        },
+        {
+            "label": "Preset: Workflow (release)",
+            "type": "shell",
+            "command": "cmake --workflow --preset release",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Configure (minsizerel)",
+            "type": "shell",
+            "command": "cmake --preset minsizerel",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "MinSizeRel, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Build (minsizerel)",
+            "type": "shell",
+            "command": "cmake --build --preset minsizerel",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (minsizerel)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "MinSizeRel, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Install (minsizerel)",
+            "type": "shell",
+            "command": "cmake --install build/minsizerel",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (minsizerel)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/minsizerel/out"
+        },
+        {
+            "label": "Preset: Workflow (minsizerel)",
+            "type": "shell",
+            "command": "cmake --workflow --preset minsizerel",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "MinSizeRel, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Configure (debug-ninja)",
+            "type": "shell",
+            "command": "cmake --preset debug-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (debug-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (debug-ninja)",
+            "type": "shell",
+            "command": "ctest --preset debug-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (debug-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/debug-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Configure (debug-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset debug-tsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Build (debug-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-tsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-tsan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Test (debug-tsan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset debug-tsan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-tsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Install (debug-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/debug-tsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-tsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-tsan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-tsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Configure (debug-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset debug-msan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Build (debug-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-msan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-msan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Test (debug-msan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset debug-msan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-msan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Install (debug-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/debug-msan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-msan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-msan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-msan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-ninja)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-ninja)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-tsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-tsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-tsan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-tsan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-tsan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-tsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-tsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-tsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-tsan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-tsan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-tsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ThreadSanitizer"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-msan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-msan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-msan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-msan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-msan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-msan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-msan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-msan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-msan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-msan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-msan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + MemorySanitizer (Clang only)"
+        },
+        {
+            "label": "Preset: Configure (release-ninja)",
+            "type": "shell",
+            "command": "cmake --preset release-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Build (release-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset release-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (release-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Install (release-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/release-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (release-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/release-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (release-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset release-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Release, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Configure (minsizerel-ninja)",
+            "type": "shell",
+            "command": "cmake --preset minsizerel-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) MinSizeRel, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Build (minsizerel-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset minsizerel-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (minsizerel-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) MinSizeRel, sanitizers disabled by policy"
+        },
+        {
+            "label": "Preset: Install (minsizerel-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/minsizerel-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (minsizerel-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/minsizerel-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (minsizerel-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset minsizerel-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) MinSizeRel, sanitizers disabled by policy"
+        }
+    ]
+}

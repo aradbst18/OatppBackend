@@ -1,0 +1,40 @@
+# cmake-format configuration. See docs/code-style.md section 3.7.
+# Compatible with cmake-format 0.6.x. Lowercase commands, 4-space indent,
+# 100-column width to match the C++ soft limit.
+format:
+    line_width: 150
+    tab_size: 4
+    use_tabchars: false
+    max_subgroups_hwrap: 2
+    max_pargs_hwrap: 6
+    separate_ctrl_name_with_space: false
+    separate_fn_name_with_space: false
+    dangle_parens: false
+    dangle_align: prefix
+    min_prefix_chars: 4
+    max_prefix_chars: 10
+    max_lines_hwrap: 2
+    line_ending: unix
+    command_case: lower
+    keyword_case: upper
+    always_wrap: []
+    enable_sort: true
+    autosort: false
+    require_valid_layout: false
+lint:
+    function_pattern: "[0-9a-z_]+"
+    macro_pattern: "[0-9a-z_]+"
+    global_var_pattern: "[0-9A-Z][0-9A-Z_]+"
+    internal_var_pattern: "_[0-9A-Z][0-9A-Z_]+"
+    local_var_pattern: "[a-z_][0-9a-z_]*"
+    private_var_pattern: "_[0-9a-z_]+"
+    public_var_pattern: "[0-9A-Z][0-9A-Z_]+"
+    keyword_pattern: "[0-9A-Z_]+"
+    max_conditionals_custom_parser: 2
+    min_statement_spacing: 1
+    max_statement_spacing: 2
+    max_returns: 6
+    max_branches: 12
+    max_arguments: 5
+    max_localvars: 15
+    max_statements: 50

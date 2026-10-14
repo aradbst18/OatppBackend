@@ -1,0 +1,279 @@
+# CMake
+
+C++17 is enforced (`CMAKE_CXX_STANDARD 17 ... REQUIRED`, extensions off).
+Target-based only: `target_link_libraries`, `target_include_directories`,
+`target_compile_definitions` with scope. No global `include_directories` or
+`add_definitions`.
+
+## Options
+
+| Option               | Values                    | Default  | Effect                                                        |
+| -------------------- | ------------------------- | -------- | ------------------------------------------------------------- |
+| `APP_ENABLE_ZLIB`    | `ON/OFF`                  | `ON`     | `find_package(oatpp-zlib)`, `APP_WITH_ZLIB`, gzip handlers    |
+| `APP_ENABLE_SWAGGER` | `ON/OFF`                  | `ON`     | `find_package(oatpp-swagger)`, `APP_WITH_SWAGGER`, UI routes  |
+| `APP_DATABASE_BACKEND` | `SQLITE`/`SQLCIPHER`    | `SQLITE` | backend impl, `APP_DATABASE_*` (+`SQLITE_HAS_CODEC`)          |
+| `APP_PASSWORD_HASH_ALGO` | `SHA256`/`SHA384`/`SHA512` | `SHA256` | password hash, `APP_PASSWORD_HASH_SHA*` (OpenSSL EVP)     |
+| `APP_CONFIG_FORMAT`  | `JSON`/`TOML`/`XML`/`YAML` | `JSON`  | active store, `APP_CONFIG_*`                                  |
+| `APP_VERSION`          | `x.y.z`               | `0.0.1`  | app version, sets `PROJECT_VERSION`                           |
+| `APP_RELEASE_DATE`     | `yyyy-mm-dd` (empty = configure date) | auto | release/build date stamp                        |
+| `APP_VERSION_FILE_FORMAT` | `JSON`/`TOML`/`XML`/`YAML` | `JSON` | version file syntax, `APP_VERSION_FILE_*`                |
+| `APP_ENABLE_JSON_PARSER` | `ON/OFF`              | `ON`     | `find_package(jsoncpp)`, `APP_WITH_JSON_PARSER`               |
+| `APP_ENABLE_TOML_PARSER` | `ON/OFF`              | `ON`     | `find_package(toml11)`, `APP_WITH_TOML_PARSER`                |
+| `APP_ENABLE_XML_PARSER`  | `ON/OFF`              | `ON`     | `find_package(pugixml)`, `APP_WITH_XML_PARSER`                |
+| `APP_ENABLE_YAML_PARSER` | `ON/OFF`              | `ON`     | `find_package(yaml-cpp)`, `APP_WITH_YAML_PARSER`              |
+| `APP_BUILD_TESTS`      | `ON/OFF`              | `ON`     | build `tests/` (`app_tests`); `OFF` skips CTest entirely     |
+| `ENABLE_SANITIZERS`    | `ON/OFF`              | `ON`     | master sanitizer switch; the build type selects the set (see below) |
+| `VERBOSE_BUILD_SUMMARY`| `ON/OFF`              | `OFF`    | per-dependency link-type/path/version table in the summary  |
+| `CMAKE_BUILD_TYPE`   | `Debug/Release/...`       | —        | standard optimization/debug flags                             |
+
+Invalid `APP_DATABASE_BACKEND`/`APP_PASSWORD_HASH_ALGO`/`APP_CONFIG_FORMAT` values are a configure-time
+`FATAL_ERROR` (comparison is case-insensitive: `"JSOn"`, `"SQLite"`, … are
+normalized to uppercase first), as is selecting a format whose parser is disabled (e.g.
+`APP_CONFIG_FORMAT=JSON` with `APP_ENABLE_JSON_PARSER=OFF`). Disabled features
+are never searched (`find_package` is inside `if()`), never compiled
+(`target_sources` conditionals in the root `CMakeLists.txt`), and never
+linked. Boolean flags accept `ON`/`OFF` (any case), `TRUE`/`FALSE`,
+`YES`/`NO`, `Y`/`N` and `1`/`0` (`false = OFF = 0`, `true = ON = 1`) and are
+canonicalized to `ON`/`OFF` in the cache; anything else fails configure. The parser flags live in the `base` preset's `cacheVariables` (rarely
+changed) and are inherited by every configuration.
+
+## Static linking
+
+`.a` sorts before `.so` in `CMAKE_FIND_LIBRARY_SUFFIXES`, so every dependency
+links statically wherever a static archive exists (oatpp, jsoncpp, pugixml,
+yaml-cpp, sqlite, zlib; toml11/jwt-cpp are header-only). Two libraries stay
+shared: OpenSSL (Ubuntu's static `libcrypto.a` needs the uninstalled
+`libjitterentropy`) and SQLCipher (ships shared-only); the static sqlite
+archive additionally links `zstd`. Only system runtimes (`libc`, `libstdc++`,
+…) plus those two remain dynamic — confirm with `ldd`.
+
+## Verbose build summary
+
+`VERBOSE_BUILD_SUMMARY` (default `OFF`, in `base` `cacheVariables`) adds a
+per-dependency table to the configure summary: CMake target, static/shared/
+interface link type, resolved path, and version:
+
+```bash
+cmake --preset debug -DVERBOSE_BUILD_SUMMARY=ON
+```
+
+## Modules (`cmake/`)
+
+- `options.cmake` — flags, validation, `apply_app_definitions()`.
+- `dependencies.cmake` — all `find_package` calls + `link_app_dependencies()`.
+  SQLCipher builds alias `SQLite::SQLite3` to `PkgConfig::SQLCIPHER` because
+  `oatpp-sqlite`'s interface references that name unconditionally; the codec
+  library therefore wins at link time.
+- `compiler.cmake` — `apply_app_warnings()` (strict set, our targets only),
+  `apply_app_build_type_flags()` (per-config optimization/debug/size tuning for
+  `Debug`, `RelWithDebInfo`, `Release`, `MinSizeRel` plus `DebugTSan`/
+  `DebugMSan`/`RelWithDebInfoTSan`, which mirror their base type) and
+  `apply_app_hardening()` (production hardening for `Release`/`MinSizeRel` on
+  Linux GNU/Clang: `_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, PIE,
+  RELRO+immediate binding; RelWithDebInfo excluded so its sanitizer variants
+  never meet FORTIFY).
+- `sanitizers.cmake` — single sanitizer switch `ENABLE_SANITIZERS` plus the
+  single source of truth (`app_effective_sanitizers()`,
+  `app_apply_sanitizers()`): `Debug`/`RelWithDebInfo` → ASan+UBSan,
+  `DebugTSan`/`RelWithDebInfoTSan` → TSan only, `DebugMSan` → MSan (Clang
+  only), `Release`/`MinSizeRel` → never (policy). Custom types get explicit
+  base flags here because CMake supplies none.
+- `build_summary.cmake` — configure-time feature echo, incl. the *effective*
+  `Sanitizers:` set (never just the raw switch; `None (disabled by policy …)`
+  for `Release`/`MinSizeRel`).
+
+## Presets
+
+`CMakePresets.json` holds `base` (hidden: generator, output dirs, and every
+`APP_*` default — everything except `CMAKE_BUILD_TYPE`; it contains no
+sanitizer toggle), plus one leaf preset per configuration, each with its own
+`build/<preset-name>/` dir (no cache contamination) and its own explicit
+`ENABLE_SANITIZERS` value: `debug`, `debug-tsan`, `debug-msan` (Clang only),
+`relwithdebinfo`, `relwithdebinfo-tsan` and `relwithdebinfo-msan` (Clang only)
+set `true`; `release` and `minsizerel` set `false`. `ENABLE_SANITIZERS` is the single sanitizer toggle
+(no per-sanitizer options): `-DENABLE_SANITIZERS=OFF` disables instrumentation
+for every configuration, and `Release`/`MinSizeRel` stay sanitizer-free even
+with `ON` (enforced in `cmake/sanitizers.cmake`, not just by preset values).
+Any value is overridden per configure with `-D` (command-line `-D` wins over
+preset `cacheVariables`):
+
+```bash
+cmake --preset debug && cmake --build --preset debug \
+  && ctest --preset debug
+cmake --preset debug -DAPP_CONFIG_FORMAT=YAML -DAPP_DATABASE_BACKEND=SQLCIPHER
+cmake --preset debug-tsan && cmake --build --preset debug-tsan
+cmake --preset relwithdebinfo-msan   # Clang only; fails configure on GCC
+cmake --preset debug -DENABLE_SANITIZERS=OFF   # any preset, sanitizers off
+bash scripts/check_sanitizers.sh               # configure-only matrix check
+```
+
+`CMakeUserPresets.json` (local overlay, Ninja + `-ninja` names, `jobs: 6`)
+mirrors all eight configurations for day-to-day development (`debug-ninja` is
+the `scripts/build.sh` default):
+
+```bash
+cmake --preset debug-ninja && cmake --build --preset debug-ninja
+```
+
+Each preset builds into `build/<preset-name>/`, which is git-ignored.
+
+## Full test matrix (`scripts/test_matrix.sh`)
+
+There are intentionally no checked-in matrix presets. The full backend x
+format x feature matrix (plus parser-exclusion builds and fail-fast
+negatives) is driven by `scripts/test_matrix.sh`, which runs plain
+`cmake -S/-B` with explicit `-D` flags per combination into
+`build/matrix/<combo>/`:
+
+```bash
+scripts/test_matrix.sh debug      # 32 combos + parser checks
+scripts/test_matrix.sh release
+MATRIX_FORMATS="JSON YAML" MATRIX_BACKENDS=SQLITE MATRIX_FEATURES=minimal \
+  scripts/test_matrix.sh debug    # subset
+MATRIX_PARSERS=0 scripts/test_matrix.sh debug   # skip parser checks
+MATRIX_VERSION_FORMATS="JSON TOML XML YAML" scripts/test_matrix.sh debug  # all version writers
+GENERATOR=Ninja scripts/test_matrix.sh debug    # -G Ninja
+```
+
+## Staged output (`out/`)
+
+Every preset sets `CMAKE_INSTALL_PREFIX` to `build/<preset-name>/out`, so
+`cmake --install` stages a runnable tree per configuration:
+
+```bash
+cmake --install build/release
+./build/release/out/bin/oatpp-backend --config configs/app.conf
+```
+
+Layout: `out/bin/oatpp-backend` plus, only when `APP_ENABLE_SWAGGER=ON`,
+`out/share/swagger-res/` (Swagger UI assets, resolved from the `swagger.resPath`
+setting with exe-relative `../share/swagger-res` and `OATPP_SWAGGER_RES_PATH` env
+fallbacks; dev runs fall back to the configure-time source dir). No config or version files are
+installed: the app creates `configs/app.conf` from defaults on first startup
+when missing and rewrites `configs/version.conf` on every startup, both
+relative to the working directory — pass `--config <path>` to place them
+elsewhere. System shared libraries (OpenSSL, ZLIB, SQLite/SQLCipher,
+libstdc++) are expected on the target machine and are not bundled.
+
+## Targets
+
+- `app_core` (static): everything except `main()`.
+- `oatpp-backend` (executable): `src/main.cpp` + `app_core`.
+- `app_tests` (CTest): `tests/` + `app_core`, registered via `add_test`.
+
+## Workflows
+
+Every configure preset has a matching workflow preset of the same name:
+test-carrying presets chain configure+build+test, `release`/`minsizerel`
+(which register no tests) chain configure+build only:
+
+```bash
+cmake --workflow --preset debug
+cmake --workflow --preset debug-tsan
+cmake --workflow --preset relwithdebinfo
+cmake --workflow --preset minsizerel   # configure+build, no test step
+cmake --workflow --preset debug-ninja   # Ninja overlay
+cmake --workflow --list-presets
+```
+
+## Examples
+
+```bash
+# Default: SQLite + JSON + Swagger + Zlib
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+
+# Minimal: SQLite + TOML, no Swagger/Zlib
+cmake -S . -B build-min -DAPP_ENABLE_SWAGGER=OFF -DAPP_ENABLE_ZLIB=OFF \
+  -DAPP_DATABASE_BACKEND=SQLITE -DAPP_CONFIG_FORMAT=TOML
+cmake --build build-min --parallel
+
+# Encrypted: SQLCipher + JSON
+cmake -S . -B build-cipher -DAPP_DATABASE_BACKEND=SQLCIPHER
+cmake --build build-cipher --parallel
+```
+
+## Build matrix (verified via `scripts/test_matrix.sh`)
+
+| Backend   | Format | Swagger | Zlib | Result  |
+| --------- | ------ | ------- | ---- | ------- |
+| SQLITE    | JSON   | ON      | ON   | 76/76 pass |
+| SQLITE    | YAML   | ON      | ON   | pass    |
+| SQLITE    | XML    | OFF     | OFF  | pass    |
+| SQLITE    | TOML   | ON      | OFF  | pass    |
+| SQLCIPHER | JSON   | ON      | ON   | 75/75 pass |
+| SQLCIPHER | YAML   | ON      | ON   | pass    |
+| SQLCIPHER | TOML   | OFF     | OFF  | pass    |
+
+Leak checks: SQLite `libapp_core.a` contains zero `sqlcipher` symbols and the
+binary does not link `libsqlcipher`; `SqlcipherDatabase.hpp` `#error`s when
+included without `APP_DATABASE_SQLCIPHER`. Swagger OFF serves 404 on
+`/swagger/ui` while APIs keep working (verified with curl).
+
+## Build configurations
+
+| Preset | `CMAKE_BUILD_TYPE` | Optimize | Debug info | Sanitizers (`ON`) | Production-ready |
+|---|---|---|---|---|---|
+| `debug` | `Debug` | `-O0` | `-g3`, frame pointers, `DEBUG` | ASan+UBSan | No (diagnostics) |
+| `debug-tsan` | `DebugTSan` | `-O0` | `-g3`, frame pointers, `DEBUG` | TSan only | No |
+| `debug-msan` | `DebugMSan` | `-O0` | `-g3`, frame pointers, `DEBUG` | MSan only (Clang) | No |
+| `relwithdebinfo-msan` | `RelWithDebInfoMSan` | `-O2` | `-g`, kept | MSan only (Clang) | No |
+| `relwithdebinfo` | `RelWithDebInfo` | `-O2` | `-g`, kept (never stripped) | ASan+UBSan | Yes, if debuggable prod needed |
+| `relwithdebinfo-tsan` | `RelWithDebInfoTSan` | `-O2` | `-g`, kept | TSan only | Yes, if debuggable prod needed |
+| `release` | `Release` | `-O3`+LTO | none (`-s` strips) | Never | Yes (default deploy) |
+| `minsizerel` | `MinSizeRel` | `-Os`+LTO | none (`-s` strips) | Never | Yes (smallest) |
+
+`Release`/`MinSizeRel` additionally harden on Linux GNU/Clang
+(`_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, PIE, RELRO+immediate
+binding). Measured sizes, SQLCipher+TOML build, `release`/`minsizerel` without
+Swagger (preset defaults): `minsizerel` 2.8M < `release` 3.1M <
+`debug-tsan` 33M < `relwithdebinfo-tsan` 37M < `debug` 58M (ASan) <
+`relwithdebinfo` 65M (ASan).
+
+Note the ordering: `RelWithDebInfo` is *larger* than `Debug` here, and that
+is correct — not a misconfiguration. Section analysis (`size -A`) shows why:
+`relwithdebinfo` carries 18.3M of `.debug_info` vs 10.6M for `debug`, plus a
+3.2M `.debug_loclists` section, while `.text` grows 6.8M → 7.6M. `-O2`
+inlining duplicates ASan-instrumented code at every inline site and each copy
+gets full debug records; the static archives show the identical pattern
+(`libapp_core.a` 93M vs 104M), proving a compile-stage effect. A
+sanitizer-free control build confirms it (`Debug` 28.5M vs `RelWithDebInfo`
+31M). So with debug info retained, `-O2` binaries routinely outweigh `-O0`
+ones; stripping is what makes `Release`/`MinSizeRel` small.
+
+## Sanitizer compatibility (verified)
+
+| Toolchain | ASan+UBSan | TSan | MSan |
+|---|---|---|---|
+| GCC 15 (Linux x86_64) | ✅ built+tested | ✅ built+tested | ❌ configure error (Clang-only) |
+| Clang (Linux) | ✅ expected | ✅ expected | ⚠️ needs fully instrumented stdlib/deps (`debug-msan` and `relwithdebinfo-msan`) |
+| MSVC | ASan-only degrade | ❌ fatal | ❌ fatal |
+
+Rules enforced in `cmake/sanitizers.cmake`: TSan is never combined with ASan;
+a requested-but-unsupported sanitizer fails configure instead of silently
+dropping flags; `Release`/`MinSizeRel` ignore the switch by policy. LSan is
+not listed separately (integrated into ASan on Linux). TSan binaries exit
+nonzero on races (exit code 66), so `ctest` reports them as failures; run
+TSan test presets when hunting races.
+
+## Deployment workflow
+
+1. Deploy `Release` (default) or `MinSizeRel` (smallest). Both are PIE,
+   RELRO-hardened, stripped, and link no sanitizer runtimes (verify with
+   `ldd build/release/oatpp-backend`).
+2. On a production issue, reproduce with `relwithdebinfo` (same `-O2`
+   optimization, symbols retained, deployable where deps exist).
+3. If that is insufficient, use `debug` (unoptimized, `-g3`, `DEBUG`
+   assertions) under `gdb` (`.vscode/launch.json` has `debug` and
+   `relwithdebinfo` server configs).
+4. For suspected memory corruption/UB/races/uninitialized memory, use
+   `debug`, `debug-tsan`, or `debug-msan` (Clang) respectively.
+
+Cross-machine limits: the binary needs its dynamic deps on the target
+(OpenSSL, SQLCipher/SQLite, `libstdc++`, matching glibc ABI — build glibc
+2.43 here; older targets need a rebuild). Keep the exact shipped binary plus
+its `relwithdebinfo` counterpart (same commit/flags) for symbolization;
+`MinSizeRel`/`Release` carry no usable symbols (`-s`). `ENABLE_SANITIZERS`
+binaries additionally need the matching sanitizer runtime and must never be
+deployed.

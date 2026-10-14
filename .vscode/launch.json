@@ -1,0 +1,269 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug server (debug)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug)"
+        },
+        {
+            "name": "Debug tests (debug)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug)"
+        },
+        {
+            "name": "Debug server (debug-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-ninja)"
+        },
+        {
+            "name": "Debug tests (debug-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-ninja)"
+        },
+        {
+            "name": "Debug server (debug-tsan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-tsan/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-tsan)"
+        },
+        {
+            "name": "Debug tests (debug-tsan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-tsan/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-tsan)"
+        },
+        {
+            "name": "Debug server (debug-tsan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-tsan-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-tsan-ninja)"
+        },
+        {
+            "name": "Debug tests (debug-tsan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-tsan-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-tsan-ninja)"
+        },
+        {
+            "name": "Debug server (debug-msan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-msan/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-msan)"
+        },
+        {
+            "name": "Debug tests (debug-msan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-msan/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-msan)"
+        },
+        {
+            "name": "Debug server (debug-msan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-msan-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-msan-ninja)"
+        },
+        {
+            "name": "Debug tests (debug-msan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/debug-msan-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (debug-msan-ninja)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-ninja)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-ninja)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo-tsan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-tsan/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-tsan)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo-tsan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-tsan/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-tsan)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo-tsan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-tsan-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-tsan-ninja)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo-tsan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-tsan-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-tsan-ninja)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo-msan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-msan/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-msan)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo-msan)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-msan/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-msan)"
+        },
+        {
+            "name": "Debug server (relwithdebinfo-msan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-msan-ninja/oatpp-backend",
+            "args": [
+                "--config",
+                "${workspaceFolder}/configs/app.conf"
+            ],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-msan-ninja)"
+        },
+        {
+            "name": "Debug tests (relwithdebinfo-msan-ninja)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/relwithdebinfo-msan-ninja/tests/app_tests",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "Preset: Build (relwithdebinfo-msan-ninja)"
+        }
+    ]
+}

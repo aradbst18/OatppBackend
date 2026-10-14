@@ -1,0 +1,26 @@
+# Line-ending and encoding policy. See docs/code-style.md section 7.
+* text=auto eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.xml text eol=lf
+*.conf text eol=lf
+
+# Binary assets and databases stay untouched.
+*.db binary
+*.o binary
+*.obj binary
+*.log binary
+
+# Preserve executable bit intent; scripts are +x (see scripts/).
+*.sh text eol=lf
