@@ -43,7 +43,7 @@ std::shared_ptr<oatpp::swagger::DocumentInfo> createDocumentInfo();
 /// `resPath` is the configured swaggerResPath; when it does not exist the
 /// exe-relative installed copy (`../share/swagger-res`) and the
 /// `OATPP_SWAGGER_RES_PATH` env var are tried before falling back to it.
-void registerSwaggerWithEndpoints(const std::shared_ptr<oatpp::web::server::HttpRouter>& router, const oatpp::web::server::api::Endpoints& endpoints,
-                                  const std::string& resPath);
+void registerSwaggerWithEndpoints(const std::shared_ptr<oatpp::web::server::HttpRouter>& router,
+                                  const oatpp::web::server::api::Endpoints& endpoints, const std::string& resPath);
 
 }  // namespace app::infrastructure

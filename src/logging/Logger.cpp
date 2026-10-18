@@ -249,7 +249,8 @@ void Logger::appendToFile(const std::string& dir, const std::string& line)
         {
             // No recursion into Logger::log here: report directly so a broken log
             // directory can never deadlock or recurse.
-            std::cerr << formatLine(currentTimeString(), Level::Error, "logging", "Cannot write log file: " + path) << '\n';
+            std::cerr << formatLine(currentTimeString(), Level::Error, "logging", "Cannot write log file: " + path)
+                      << '\n';
             return;
         }
 

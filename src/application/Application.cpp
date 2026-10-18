@@ -2,6 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 
 #include "oatpp-websocket/ConnectionHandler.hpp"
 #include "oatpp/core/base/Environment.hpp"
@@ -18,6 +21,7 @@
 #include "app/infrastructure/Swagger.hpp"
 #endif  // APP_WITH_SWAGGER
 
+#include "app/auth/PasswordHash.hpp"
 #include "app/config/ConfigStore.hpp"
 #include "app/config/VersionFile.hpp"
 #include "app/controllers/AuthController.hpp"
@@ -26,9 +30,16 @@
 #include "app/errors/ErrorMapper.hpp"
 #include "app/infrastructure/TextFile.hpp"
 #include "app/infrastructure/database/DatabaseFactory.hpp"
+
+#ifdef APP_WITH_POSTGRESQL
+#include "app/infrastructure/database/PostgresqlLocalServer.hpp"
+#endif  // APP_WITH_POSTGRESQL
+
 #include "app/logging/Logger.hpp"
 #include "app/logging/OatppLoggerBridge.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
+#include "app/middlewares/CorsInterceptor.hpp"
+#include "app/middlewares/RateLimitInterceptor.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/serialization/AppObjectMapper.hpp"
 #include "app/websocket/EchoListener.hpp"
@@ -93,28 +104,49 @@ void Application::initInfrastructure()
     logging::tryParseLevel(settings_.logLevel, level);
     auto& logger = logging::Logger::instance();
     logger.setMinLevel(level);
-    logger.setLogFileDirectory(settings_.logFilePath);
+    logger.setLogFileDirectory(settings_.logPath);
 
-    if (!settings_.logFilePath.empty())
+    if (!settings_.logPath.empty())
     {
-        logging::logInfo("app", "File logging to " + logging::Logger::resolveLogFilePath(settings_.logFilePath));
+        logging::logInfo("app", "File logging to " + logging::Logger::resolveLogFilePath(settings_.logPath));
     }
 
     try
     {
-        const config::VersionInfo version = config::currentVersionInfo();
+        // Same completeness contract as the main config: create when
+        // missing, complete absent fields from the current build info,
+        // reject wrong types and invalid values.
         const std::string versionPath = config::defaultVersionFilePath();
-        config::writeVersionFile(versionPath, version);
-        logging::logInfo("app", "Version " + version.version + " (" + version.releaseDate + ") written to " + versionPath);
+        const std::vector<std::string> completed = config::ensureVersionFile(versionPath);
+        const config::VersionInfo version = config::currentVersionInfo();
+        if (completed.empty())
+        {
+            logging::logInfo("app",
+                             "Version " + version.version + " (" + version.releaseDate + ") written to " + versionPath);
+        }
+        else
+        {
+            std::string joined;
+            for (const std::string& name : completed)
+            {
+                joined += (joined.empty() ? "" : ", ") + name;
+            }
+
+            logging::logInfo("app", "Version " + version.version + " (" + version.releaseDate + ") written to " +
+                                        versionPath + " (completed missing parameters: " + joined + ")");
+        }
     }
     catch (const std::exception& ex)
     {
-        // Informational file only: never fail startup because of it.
-        logging::logWarn("app", std::string("Cannot write version file: ") + ex.what());
+        // Invalid version content is the operator's to fix: record it as
+        // critical in the configured log and abort startup.
+        logging::logCritical("app", std::string("Invalid version file: ") + ex.what());
+        throw;
     }
     catch (...)
     {
-        logging::logWarn("app", "Cannot write version file: unknown error");
+        logging::logCritical("app", "Invalid version file: unknown error");
+        throw;
     }
 
     logging::logInfo("app", "Initializing infrastructure");
@@ -122,23 +154,84 @@ void Application::initInfrastructure()
 
 void Application::initDatabase()
 {
-#ifdef APP_DATABASE_SQLCIPHER
+#if defined(APP_DATABASE_SQLCIPHER) && defined(APP_DATABASE_POSTGRESQL)
+#error "APP_DATABASE_* defines are mutually exclusive (configure with -DAPP_USERS_DATABASE_TYPE=SQLCIPHER|POSTGRESQL)"
+
+#elif defined(APP_DATABASE_POSTGRESQL)
+    // Step-by-step verification for PostgreSQL:
+    // missing server -> create + start + role/db, down -> start,
+    // running -> verify role/db + scram, then open + schema + admin.
+    // Test databases (oatpp_test_*) are provisioned externally by
+    // tests/support/TestDb.hpp; skip server management there so tests
+    // stay hermetic and never restart the shared server mid-run.
+    const bool isTestDb = settings_.databaseName.rfind("oatpp_test_", 0) == 0;
+
+    if (!isTestDb)
+    {
+        infrastructure::database::PostgresqlLocalServer server(settings_.databasePath, settings_.databasePort,
+                                                               settings_.databaseName, settings_.databaseUser,
+                                                               settings_.databaseKey);
+        server.ensureProvisioned();
+    }
+
+    database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath, settings_.databasePort,
+                                                                  settings_.databaseName, settings_.databaseUser,
+                                                                  settings_.databaseKey);
+
+#elif defined(APP_DATABASE_SQLCIPHER)
+    // File backend (always SQLCipher-backed; encrypted when a key is set):
+    // missing app.db -> create on open; existing file -> verify schema +
+    // admin below. Explicit existence log keeps the verification steps visible.
+    const bool missing = settings_.databasePath != ":memory:" && !infrastructure::fileExists(settings_.databasePath);
+    if (missing)
+    {
+        logging::logInfo("app", "User database file missing at '" + settings_.databasePath + "'; creating");
+    }
+    else
+    {
+        logging::logInfo("app", "User database file exists at '" + settings_.databasePath + "'; verifying admin user");
+    }
+
+#ifdef APP_USER_DATABASE_ENCRYPTED
+    if (settings_.databaseKey.empty())
+    {
+        logging::logWarn("app", "User database key is empty; opening the file without encryption (plaintext)");
+    }
+
     database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath, settings_.databaseKey);
 #else
     database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath);
-#endif  // APP_DATABASE_SQLCIPHER
+#endif  // APP_USER_DATABASE_ENCRYPTED
+
+#else
+#error \
+    "No database backend defined (require APP_DATABASE_SQLCIPHER or APP_DATABASE_POSTGRESQL via -DAPP_USERS_DATABASE_TYPE=SQLCIPHER|POSTGRESQL)"
+#endif  // APP_DATABASE backend selection (SQLCIPHER / POSTGRESQL)
 
     database_->open();
+
     users_ = std::make_shared<repositories::UserRepository>(database_);
     users_->ensureSchema();
+
+    refreshTokens_ = std::make_shared<repositories::RefreshTokenRepository>(database_);
+    refreshTokens_->ensureSchema();
+
     logging::logInfo("app", "Database opened (" + database_->backendName() + ")");
 }
 
 void Application::initServices()
 {
-    jwt_ = std::make_shared<auth::JwtService>(settings_.jwtSecret, settings_.jwtIssuer, std::chrono::seconds(settings_.jwtTtlSeconds));
-    auth_ = std::make_shared<services::AuthService>(users_, jwt_);
+    if (settings_.jwtSecret.find("change-me") != std::string::npos)
+    {
+        logging::logWarn(
+            "auth", "Using default/insecure JWT secret! Configure a cryptographically random secret in production.");
+    }
+
+    jwt_ = std::make_shared<auth::JwtService>(settings_.jwtSecret, settings_.jwtIssuer,
+                                              std::chrono::seconds(settings_.jwtTtlSeconds));
+    auth_ = std::make_shared<services::AuthService>(users_, jwt_, refreshTokens_);
     auth_->ensureSeeded();
+
     logging::logInfo("app", "Services initialized");
 }
 
@@ -154,6 +247,7 @@ void Application::initRouting()
 
     auto authController = std::make_shared<controllers::AuthController>(objectMapper, auth_, jwt_);
     auto echoController = std::make_shared<controllers::EchoController>(objectMapper, websocketHandler_);
+
     router_->addController(authController);
     router_->addController(echoController);
 
@@ -183,12 +277,20 @@ void Application::initRouting()
 
     httpHandler_ = std::make_shared<oatpp::web::server::HttpConnectionHandler>(components);
     httpHandler_->setErrorHandler(errors::AppErrorHandler::createShared());
+
+    auto cors = std::make_shared<middlewares::CorsInterceptor>(settings_.corsAllowedOrigins);
+    httpHandler_->addRequestInterceptor(cors);
+    httpHandler_->addResponseInterceptor(cors);
+
+    httpHandler_->addRequestInterceptor(std::make_shared<middlewares::RateLimitInterceptor>());
     httpHandler_->addRequestInterceptor(std::make_shared<middlewares::AuthInterceptor>(jwt_));
 
     // Connection provider is created here but the blocking Server runs in run().
     connectionProvider_ = oatpp::network::tcp::server::ConnectionProvider::createShared(
         {settings_.host.c_str(), static_cast<v_uint16>(settings_.port), oatpp::network::Address::IP_4});
+
     server_ = std::make_shared<oatpp::network::Server>(connectionProvider_, httpHandler_);
+
     logging::logInfo("app", "Routing initialized on " + settings_.host + ":" + std::to_string(settings_.port));
 }
 
@@ -202,6 +304,7 @@ void Application::run()
     }
 
     logging::logInfo("app", "Server running");
+
     // NOTE: websocket upgrades are dispatched through the EchoController using
     // the shared websocketHandler_ component; both handlers serve the same
     // connection provider via the HTTP upgrade path.
@@ -271,23 +374,87 @@ std::shared_ptr<infrastructure::database::IDatabase> Application::database()
     return database_;
 }
 
+std::shared_ptr<repositories::RefreshTokenRepository> Application::refreshTokenRepository()
+{
+    initialize();
+    return refreshTokens_;
+}
+
 config::AppSettings loadSettingsOrDefaults(const std::string& configPath)
 {
     std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
-    auto store = config::createActiveStore();
-    if (!infrastructure::fileExists(path))
+    const bool missingBefore = !infrastructure::fileExists(path);
+    ensureConfigExists(path);
+    config::AppSettings loaded = loadSettings(path);
+
+    if (missingBefore)
     {
-        // First startup (or a fresh --config path): materialize the active
-        // `configs/app.conf` from defaults so the file always exists going
-        // forward, then proceed with those values. save() validates first and
-        // creates parent directories as needed.
-        auto created = config::AppSettings::defaults();
-        store->save(path, created);
-        created.configSource = path + " (created)";
-        return created;
+        loaded.configSource = path + " (created)";
     }
 
-    return store->load(path);
+    return loaded;
+}
+
+void ensureConfigExists(const std::string& configPath)
+{
+    std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
+    if (infrastructure::fileExists(path))
+    {
+        return;
+    }
+
+    // First startup (or a fresh --config path): materialize the file from
+    // per-type defaults so it always exists going forward. Generate a fresh
+    // cryptographically random 32-byte JWT secret instead of using a static default.
+    auto created = config::AppSettings::defaults();
+    created.jwtSecret = auth::generateRandomSecret(32);
+    auto store = config::createActiveStore();
+    store->save(path, created);
+}
+
+config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing)
+{
+    std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
+    auto store = config::createActiveStore();
+    return store->load(path, missing);
+}
+
+std::string executableDir(const std::string& argv0)
+{
+    const auto sep = argv0.find_last_of("/\\");
+    if (sep == std::string::npos || sep == 0)
+    {
+        return ".";
+    }
+
+    return argv0.substr(0, sep);
+}
+
+void writeCriticalLog(const std::string& exeDir, const std::string& tag, const std::string& message) noexcept
+{
+    try
+    {
+        // Same daily file layout as the main log, rooted next to the
+        // executable: <exeDir>/logs/yyyy-mm-dd.log.
+        const std::string base = exeDir.empty() ? "." : exeDir;
+        const std::string dir = base + "/logs";
+        const std::string path = dir + "/" + logging::Logger::currentDateString() + ".log";
+        const std::string line =
+            logging::Logger::formatLine(logging::Logger::currentTimeString(), logging::Level::Critical, tag, message) +
+            "\n";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        (void)ec;
+
+        std::ofstream out(path, std::ios::app);
+        if (out)
+        {
+            out << line;
+        }
+    }
+    catch (...)
+    {
+    }
 }
 
 }  // namespace app::application

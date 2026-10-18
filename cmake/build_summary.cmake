@@ -1,7 +1,9 @@
-# Build summary printed at configure time. Every project setting that can be changed via a variable or option is echoed below; per-dependency paths,
-# versions and static/shared link types only print when VERBOSE_BUILD_SUMMARY=ON (base preset cacheVariables).
+# Build summary printed at configure time. Every project setting that can be changed via a variable or option is echoed
+# below; per-dependency paths, versions and static/shared link types only print when VERBOSE_BUILD_SUMMARY=ON (base
+# preset cacheVariables).
 
-# One "label : value" row. Labels are padded to a fixed width so every ':' lands in a single column (longest label is CMAKE_EXPORT_COMPILE_COMMANDS).
+# One "label : value" row. Labels are padded to a fixed width so every ':' lands in a single column (longest label is
+# CMAKE_EXPORT_COMPILE_COMMANDS).
 function(app_summary_row label value)
     set(_width 29)
     string(LENGTH "${label}" _len)
@@ -28,7 +30,8 @@ function(app_flag_emoji var out)
     endif()
 endfunction()
 
-# Report one dependency target: type, resolved file (static .a vs shared .so) and version when the find module provides one.
+# Report one dependency target: type, resolved file (static .a vs shared .so) and version when the find module provides
+# one.
 function(app_describe_target tgt)
     if(NOT TARGET ${tgt})
         app_summary_row("${tgt}" "<not in this build>")
@@ -38,8 +41,8 @@ function(app_describe_target tgt)
     get_target_property(tgt_type ${tgt} TYPE)
 
     set(loc "")
-    foreach(prop IMPORTED_LOCATION IMPORTED_LOCATION_${CMAKE_BUILD_TYPE} IMPORTED_LOCATION_NOCONFIG IMPORTED_LOCATION_NONE IMPORTED_LOCATION_RELEASE
-                 IMPORTED_LOCATION_DEBUG)
+    foreach(prop IMPORTED_LOCATION IMPORTED_LOCATION_${CMAKE_BUILD_TYPE} IMPORTED_LOCATION_NOCONFIG
+                 IMPORTED_LOCATION_NONE IMPORTED_LOCATION_RELEASE IMPORTED_LOCATION_DEBUG)
         get_target_property(prop_val ${tgt} ${prop})
         if(prop_val AND NOT prop_val MATCHES "-NOTFOUND$")
             set(loc "${prop_val}")
@@ -77,8 +80,8 @@ function(app_describe_target tgt)
     app_summary_row("${tgt}" "link=${link} version=${ver} path=${loc}")
 endfunction()
 
-# Total number of .cpp files actually compiled into the given targets. Uses TARGET SOURCES so conditionally-added files (SQLCIPHER backend, optional
-# parsers, swagger) are only counted when enabled, unlike a filesystem GLOB.
+# Total number of .cpp files actually compiled into the given targets. Uses TARGET SOURCES so conditionally-added files
+# (file/PostgreSQL backends, optional parsers, swagger) are only counted when enabled, unlike a filesystem GLOB.
 function(app_source_file_count out_var)
     set(_all_sources "")
     foreach(_tgt IN LISTS ARGN)
@@ -115,12 +118,8 @@ function(app_target_version tgt out)
         set(candidates OPENSSL_VERSION)
     elseif(tgt STREQUAL "ZLIB::ZLIB")
         set(candidates ZLIB_VERSION_STRING)
-    elseif(tgt STREQUAL "SQLite::SQLite3")
-        set(candidates SQLite3_VERSION SQLITE3_VERSION)
     elseif(tgt STREQUAL "PkgConfig::SQLCIPHER")
         set(candidates SQLCIPHER_VERSION)
-    elseif(tgt STREQUAL "ZSTD::ZSTD")
-        set(candidates ZSTD_VERSION)
     endif()
 
     set(ver "unknown")
@@ -153,8 +152,8 @@ function(print_build_summary)
     app_flag_emoji(ENABLE_SANITIZERS _v)
     app_summary_row("ENABLE_SANITIZERS" "${_v} (master switch)")
 
-    # Effective set comes from the single source of truth in cmake/sanitizers.cmake (option + build type + compiler), never from the raw switch alone.
-    # Release/MinSizeRel report None by policy even when the switch is ON.
+    # Effective set comes from the single source of truth in cmake/sanitizers.cmake (option + build type + compiler),
+    # never from the raw switch alone. Release/MinSizeRel report None by policy even when the switch is ON.
     app_sanitizers_label(_sani_label)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" _bt_upper)
     if(ENABLE_SANITIZERS AND (_bt_upper STREQUAL "RELEASE" OR _bt_upper STREQUAL "MINSIZEREL"))
@@ -163,6 +162,13 @@ function(print_build_summary)
         app_summary_row("Sanitizers" "${_sani_label}")
     endif()
 
+    app_flag_emoji(APP_ENABLE_POSTGRESQL _v)
+    app_summary_row("APP_ENABLE_POSTGRESQL" "${_v}")
+    app_flag_emoji(APP_ENABLE_SQLCIPHER _v)
+    app_summary_row("APP_ENABLE_SQLCIPHER" "${_v}")
+    app_summary_row("APP_USERS_DATABASE_TYPE" "${APP_USERS_DATABASE_TYPE}")
+    app_flag_emoji(APP_ENCRYPTION_USER_DATABASE _v)
+    app_summary_row("APP_ENCRYPTION_USER_DATABASE" "${_v}")
     app_flag_emoji(APP_ENABLE_JSON_PARSER _v)
     app_summary_row("APP_ENABLE_JSON_PARSER" "${_v}")
     app_flag_emoji(APP_ENABLE_TOML_PARSER _v)
@@ -171,7 +177,6 @@ function(print_build_summary)
     app_summary_row("APP_ENABLE_XML_PARSER" "${_v}")
     app_flag_emoji(APP_ENABLE_YAML_PARSER _v)
     app_summary_row("APP_ENABLE_YAML_PARSER" "${_v}")
-    app_summary_row("APP_DATABASE_BACKEND" "${APP_DATABASE_BACKEND}")
     app_summary_row("APP_PASSWORD_HASH_ALGO" "${APP_PASSWORD_HASH_ALGO}")
     app_summary_row("APP_CONFIG_FORMAT" "${APP_CONFIG_FORMAT}")
     app_summary_row("APP_VERSION" "${PROJECT_VERSION}")
@@ -186,10 +191,12 @@ function(print_build_summary)
         app_summary_row("CMAKE_FIND_LIBRARY_SUFFIXES" "${CMAKE_FIND_LIBRARY_SUFFIXES}")
         message(STATUS "  dependencies:")
         app_describe_target(oatpp::oatpp)
-        app_describe_target(oatpp::oatpp-sqlite)
         app_describe_target(oatpp::oatpp-websocket)
         app_describe_target(oatpp::oatpp-zlib)
         app_describe_target(oatpp::oatpp-swagger)
+        app_describe_target(oatpp::oatpp-sqlite)
+        app_describe_target(oatpp::oatpp-postgresql)
+        app_describe_target(PkgConfig::SQLCIPHER)
         app_describe_target(jsoncpp_static)
         app_describe_target(toml11::toml11)
         app_describe_target(pugixml::static)
@@ -198,8 +205,5 @@ function(print_build_summary)
         app_describe_target(OpenSSL::SSL)
         app_describe_target(OpenSSL::Crypto)
         app_describe_target(ZLIB::ZLIB)
-        app_describe_target(SQLite::SQLite3)
-        app_describe_target(PkgConfig::SQLCIPHER)
-        app_describe_target(ZSTD::ZSTD)
     endif()
 endfunction()

@@ -1,6 +1,6 @@
 #include "support/TestRunner.hpp"
 
-int main()
+int main(int argc, char** argv)
 {
-    return app::tests::runAll();
+    return app::tests::run(argc, argv);
 }

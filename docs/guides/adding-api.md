@@ -39,7 +39,8 @@ Follow these steps in order. Each has a conformance checklist at the end.
 
 - Extend `BaseRepository` or add a new table to an existing one. Schema setup
   must be idempotent (`CREATE TABLE IF NOT EXISTS`).
-- All values as `?` bound parameters. Add an injection regression test.
+- All values as bound parameters (`QUERY` templates with `PARAM`, see
+  `adding-repository.md`). Add an injection regression test.
 
 ## 6. Controller (`include/app/controllers/`, `src/controllers/`)
 

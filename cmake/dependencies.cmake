@@ -1,11 +1,17 @@
-# Dependency discovery + linking for OatppBackend. All find_package calls are REQUIRED so a missing dependency fails with a clear message instead of
-# an obscure compile error. Optional features (zlib/swagger/ sqlcipher/parsers) are only searched when the corresponding feature flag is enabled,
-# which guarantees disabled dependencies are never linked.
+# Dependency discovery + linking for OatppBackend. All find_package calls are REQUIRED so a missing dependency fails
+# with a clear message instead of an obscure compile error. Optional features (zlib/swagger/postgresql/parsers,
+# SQLCipher file support) are only searched when the corresponding feature flag is enabled, which guarantees disabled
+# dependencies are never linked.
 #
-# Static linking policy: static archives are preferred for every dependency (.a sorts before .so below). Two exceptions keep their shared libraries:
-# OpenSSL (Ubuntu's static libcrypto.a references libjitterentropy, which is not installed here — and unused by the shared library — so static OpenSSL
-# cannot link on this machine) and SQLCipher (ships shared-only). Shared fallbacks also cover any dependency without a static archive, so configure
-# never breaks — the verbose build summary reports the actual per-library link type.
+# Static linking policy: static archives are preferred for every dependency (.a sorts before .so below). One exception
+# keeps its shared library: OpenSSL (Ubuntu's static libcrypto.a needs the uninstalled libjitterentropy). Shared
+# fallbacks also cover any dependency without a static archive, so configure never breaks — the verbose build summary
+# reports the actual per-library link type.
+#
+# User databases run through the oatpp ORM executors, which plug into the existing IDatabase::execute(sql, bound params)
+# contract so repositories work unchanged on both user databases: oatpp-sqlite executes file statements (SQLCipher
+# supplies the codec; the adapter's exported SQLite::SQLite3 reference is satisfied by SQLCipher below) and
+# oatpp-postgresql executes PostgreSQL statements (libpq underneath).
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
@@ -16,7 +22,6 @@ if(APP_ENABLE_ZLIB)
 endif()
 
 find_package(oatpp 1.3.0 EXACT REQUIRED)
-find_package(oatpp-sqlite 1.3.0 EXACT REQUIRED)
 find_package(oatpp-websocket 1.3.0 EXACT REQUIRED)
 
 if(APP_ENABLE_ZLIB)
@@ -25,6 +30,30 @@ endif()
 
 if(APP_ENABLE_SWAGGER)
     find_package(oatpp-swagger 1.3.0 EXACT REQUIRED)
+endif()
+
+# File database support is always SQLCipher-backed: the SQLCipher library is the only file-database library searched or
+# linked (it opens both plaintext and encrypted files; see docs/roadmap/postgresql_encryption.md for the PostgreSQL side). The
+# standard SQLite library is never searched.
+
+if(APP_ENABLE_SQLCIPHER)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SQLCIPHER REQUIRED IMPORTED_TARGET sqlcipher)
+    find_package(oatpp-sqlite 1.3.0 EXACT REQUIRED)
+
+    # oatpp-sqlite's static archive exports SQLite::SQLite3 (its object code calls the sqlite3_* C API). Define that
+    # target as SQLCipher: SQLCipher implements the same API, so the installed adapter works unchanged and the standard
+    # SQLite library is never searched or linked. The codec compile definition makes SQLCipher's sqlite3.h declare
+    # sqlite3_key()/sqlite3_rekey() for every consumer of this target (app_core links it through oatpp-sqlite).
+    if(NOT TARGET SQLite::SQLite3)
+        add_library(SQLite::SQLite3 INTERFACE IMPORTED)
+        set_target_properties(SQLite::SQLite3 PROPERTIES INTERFACE_LINK_LIBRARIES PkgConfig::SQLCIPHER
+                                                         INTERFACE_COMPILE_DEFINITIONS "SQLITE_HAS_CODEC=1")
+    endif()
+endif()
+
+if(APP_ENABLE_POSTGRESQL)
+    find_package(oatpp-postgresql 1.3.0 EXACT REQUIRED)
 endif()
 
 # Config parsers are only searched when enabled, so a disabled parser's dependency is never required, built, or linked.
@@ -46,42 +75,17 @@ endif()
 
 find_package(jwt-cpp 0.7.2 EXACT REQUIRED)
 
-if(APP_DATABASE_BACKEND STREQUAL "SQLITE")
-    find_package(SQLite3 REQUIRED)
-
-    # The static sqlite archive is built with zstd support, which the shared library pulls transitively but the archive needs explicitly.
-    if(SQLite3_LIBRARY MATCHES "\\.a$")
-        find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
-        if(NOT TARGET ZSTD::ZSTD)
-            add_library(ZSTD::ZSTD UNKNOWN IMPORTED)
-            set_target_properties(ZSTD::ZSTD PROPERTIES IMPORTED_LOCATION "${ZSTD_LIBRARY}")
-        endif()
-    endif()
-elseif(APP_DATABASE_BACKEND STREQUAL "SQLCIPHER")
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SQLCIPHER REQUIRED IMPORTED_TARGET sqlcipher)
-
-    # oatpp-sqlite's imported target unconditionally references SQLite::SQLite3 in its INTERFACE_LINK_LIBRARIES. In SQLCipher builds we satisfy that
-    # name with an alias to sqlcipher so the codec implementation wins at link time (never the plaintext system sqlite) and no extra
-    # find_package(SQLite3) is needed.
-    if(NOT TARGET SQLite::SQLite3)
-        add_library(SQLite::SQLite3 INTERFACE IMPORTED)
-        set_target_properties(SQLite::SQLite3 PROPERTIES INTERFACE_LINK_LIBRARIES PkgConfig::SQLCIPHER)
-    endif()
-else()
-    message(FATAL_ERROR "APP_DATABASE_BACKEND must be SQLITE or SQLCIPHER (got '${APP_DATABASE_BACKEND}')")
-endif()
-
 function(link_app_dependencies target)
-    target_link_libraries(
-        ${target}
-        PUBLIC oatpp::oatpp
-               oatpp::oatpp-sqlite
-               oatpp::oatpp-websocket
-               jwt-cpp::jwt-cpp
-               OpenSSL::SSL
-               OpenSSL::Crypto
-               Threads::Threads)
+    target_link_libraries(${target} PUBLIC oatpp::oatpp oatpp::oatpp-websocket jwt-cpp::jwt-cpp OpenSSL::SSL
+                                           OpenSSL::Crypto Threads::Threads)
+
+    if(APP_ENABLE_SQLCIPHER)
+        target_link_libraries(${target} PUBLIC PkgConfig::SQLCIPHER oatpp::oatpp-sqlite)
+    endif()
+
+    if(APP_ENABLE_POSTGRESQL)
+        target_link_libraries(${target} PUBLIC oatpp::oatpp-postgresql)
+    endif()
 
     if(APP_ENABLE_JSON_PARSER)
         target_link_libraries(${target} PUBLIC jsoncpp_static)
@@ -105,16 +109,5 @@ function(link_app_dependencies target)
 
     if(APP_ENABLE_SWAGGER)
         target_link_libraries(${target} PUBLIC oatpp::oatpp-swagger)
-    endif()
-
-    if(APP_DATABASE_BACKEND STREQUAL "SQLITE")
-        target_link_libraries(${target} PUBLIC SQLite::SQLite3)
-        if(TARGET ZSTD::ZSTD)
-            target_link_libraries(${target} PUBLIC ZSTD::ZSTD)
-        endif()
-    elseif(APP_DATABASE_BACKEND STREQUAL "SQLCIPHER")
-        target_link_libraries(${target} PUBLIC PkgConfig::SQLCIPHER)
-    else()
-        message(FATAL_ERROR "APP_DATABASE_BACKEND must be SQLITE or SQLCIPHER (got '${APP_DATABASE_BACKEND}')")
     endif()
 endfunction()

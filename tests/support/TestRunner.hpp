@@ -30,6 +30,7 @@ struct Case
 inline std::vector<Case>& registry()
 {
     static std::vector<Case> cases;
+
     return cases;
 }
 
@@ -38,12 +39,39 @@ inline void registerCase(const std::string& name, std::function<void()> func)
     registry().push_back({name, std::move(func)});
 }
 
-inline int runAll()
+inline int run(int argc = 0, char** argv = nullptr)
 {
+    std::string filter;
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--filter" && i + 1 < argc)
+        {
+            filter = argv[++i];
+        }
+        else if (arg.rfind("--filter=", 0) == 0)
+        {
+            filter = arg.substr(9);
+        }
+        else if (!arg.empty() && arg[0] != '-')
+        {
+            filter = arg;
+        }
+    }
+
     int passed = 0;
     int failed = 0;
+    int matched = 0;
+
     for (const auto& c : registry())
     {
+        if (!filter.empty() && c.name.find(filter) == std::string::npos)
+        {
+            continue;
+        }
+
+        ++matched;
+
         try
         {
             c.func();
@@ -66,8 +94,21 @@ inline int runAll()
             std::cout << "[FAIL] " << c.name << ": unknown exception\n";
         }
     }
+
+    if (!filter.empty() && matched == 0)
+    {
+        std::cout << "Error: no test cases matched filter '" << filter << "'\n";
+        return 1;
+    }
+
     std::cout << "----\n" << passed << " passed, " << failed << " failed, " << (passed + failed) << " total\n";
+
     return failed == 0 ? 0 : 1;
+}
+
+inline int runAll()
+{
+    return run();
 }
 
 [[noreturn]] inline void fail(const std::string& expr, const char* file, int line, const std::string& detail = "")
@@ -78,6 +119,7 @@ inline int runAll()
     {
         out << " (" << detail << ")";
     }
+
     throw Failure(out.str());
 }
 

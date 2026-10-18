@@ -37,7 +37,7 @@ Requires `Authorization: Bearer <jwt>`. Missing/malformed/expired/invalid ->
 1. Public path (`POST /auth/login`, `GET /ws/echo`, `/swagger/*`,
    `/api-docs/*`) -> return `nullptr` (continue).
 2. Else extract `Bearer` token -> `JwtService::verify` -> stash
-   `subject|role|issuer` in the request bundle under
+   `dto::AuthClaimsDto` in the request bundle under
    `middlewares::kClaimsBundleKey` -> `nullptr`.
 3. Any failure throws `authentication::*` (`MissingCredentials` / `InvalidToken` /
    `TokenExpired`); `AppErrorHandler` maps it to `401 text/plain` (never throws past oatpp).

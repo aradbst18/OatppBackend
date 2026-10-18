@@ -83,3 +83,7 @@ compile_commands.json
 # ── Package-manager & cache directories ─────────────────────────────
 vcpkg_installed/
 .cache/
+
+# ── Local archives & scratch ────────────────────────────────────────
+archives/
+

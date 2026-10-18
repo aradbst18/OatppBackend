@@ -18,8 +18,11 @@ namespace app::infrastructure::documents
  * so serializeXml requires a single-entry Map.
  */
 DocumentValue parseXml(const std::string& text, const std::string& source);
+
 std::string serializeXml(const DocumentValue& value);
+
 DocumentValue loadXmlFile(const std::string& path);
+
 void saveXmlFile(const std::string& path, const DocumentValue& value);
 
 }  // namespace app::infrastructure::documents

@@ -10,15 +10,18 @@
 # Usage: scripts/check_sanitizers.sh
 # Env:   GENERATOR=""  # e.g. GENERATOR=Ninja to pass -G explicitly
 #
-# Expected matrix (ENABLE_SANITIZERS=ON unless noted):
-#   debug                  -> AddressSanitizer, UndefinedBehaviorSanitizer
-#   debug-tsan             -> ThreadSanitizer only (must NOT mention AddressSanitizer)
-#   debug-msan             -> configure FAILURE on GCC (MSan is Clang-only);
+# Expected matrix (raw CMAKE_BUILD_TYPE values; ENABLE_SANITIZERS=ON unless
+# noted). The Debug / RelWithDebInfo rows are what the `debug-asan-ubsan` /
+# `relwithdebinfo-asan-ubsan` presets configure; the plain `debug` /
+# `relwithdebinfo` presets are the same builds with the switch off:
+#   Debug                  -> AddressSanitizer, UndefinedBehaviorSanitizer
+#   DebugTSan              -> ThreadSanitizer only (must NOT mention AddressSanitizer)
+#   DebugMSan              -> configure FAILURE on GCC (MSan is Clang-only);
 #                             MemorySanitizer on Clang
-#   relwithdebinfo         -> AddressSanitizer, UndefinedBehaviorSanitizer
-#   relwithdebinfo-tsan    -> ThreadSanitizer only
-#   release / minsizerel   -> None, with the policy note, even with ON
-#   debug + OFF            -> None
+#   RelWithDebInfo         -> AddressSanitizer, UndefinedBehaviorSanitizer
+#   RelWithDebInfoTSan     -> ThreadSanitizer only
+#   Release / MinSizeRel   -> None, with the policy note, even with ON
+#   Debug + OFF            -> None
 
 set -u
 cd "$(dirname "$0")/.."
@@ -31,7 +34,9 @@ FAIL=0
 FAILED=()
 
 BASE_ARGS=(
-    -DAPP_DATABASE_BACKEND=SQLCIPHER
+    -DAPP_USERS_DATABASE_TYPE=SQLCIPHER
+    -DAPP_ENABLE_SQLCIPHER=ON
+    -DAPP_ENCRYPTION_USER_DATABASE=ON
     -DAPP_CONFIG_FORMAT=TOML
     -DAPP_ENABLE_TOML_PARSER=ON
     -DAPP_BUILD_TESTS=OFF

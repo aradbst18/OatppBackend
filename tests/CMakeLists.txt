@@ -24,4 +24,23 @@ apply_app_build_type_flags(app_tests)
 apply_app_hardening(app_tests)
 app_apply_sanitizers(app_tests)
 
-add_test(NAME app_tests COMMAND app_tests)
+set(TEST_SUITES
+    "config"
+    "validation"
+    "serialization"
+    "domain"
+    "auth"
+    "database"
+    "api"
+    "websocket"
+    "lifecycle"
+    "features"
+    "generic"
+    "logging"
+    "version")
+
+foreach(SUITE ${TEST_SUITES})
+    add_test(NAME "test_${SUITE}" COMMAND app_tests "${SUITE}:")
+endforeach()
+
+add_test(NAME app_tests_all COMMAND app_tests)

@@ -5,7 +5,8 @@
 namespace app::controllers
 {
 
-EchoController::EchoController(const std::shared_ptr<ObjectMapper>& objectMapper, std::shared_ptr<oatpp::network::ConnectionHandler> websocketHandler)
+EchoController::EchoController(const std::shared_ptr<ObjectMapper>& objectMapper,
+                               std::shared_ptr<oatpp::network::ConnectionHandler> websocketHandler)
     : ApiController(objectMapper), websocketHandler_(std::move(websocketHandler))
 {
     if (!websocketHandler_)
@@ -89,7 +90,8 @@ No authentication, no request body, no JSON — just the upgrade headers above.)
     // Generator drops header params via its filteredHeaders copy (order lost),
     // so the description above carries the handshake docs even when `parameters`
     // renders empty — keep both in sync.
-    info->headers.add<String>("Upgrade").description = "Must be exactly `websocket` or the server returns 400 without upgrading.";
+    info->headers.add<String>("Upgrade").description =
+        "Must be exactly `websocket` or the server returns 400 without upgrading.";
     info->headers["Upgrade"].required = true;
     info->headers["Upgrade"].addExample("WebSocket upgrade", oatpp::String("websocket"));
 
@@ -117,7 +119,8 @@ No authentication, no request body, no JSON — just the upgrade headers above.)
 
 #endif  // APP_WITH_SWAGGER
 
-std::shared_ptr<EchoController::OutgoingResponse> EchoController::wsEcho(const std::shared_ptr<IncomingRequest>& request)
+std::shared_ptr<EchoController::OutgoingResponse> EchoController::wsEcho(
+    const std::shared_ptr<IncomingRequest>& request)
 {
     const auto upgrade = request->getHeader("Upgrade");
     if (!upgrade || std::string(upgrade->c_str()) != "websocket")

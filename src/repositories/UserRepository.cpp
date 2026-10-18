@@ -1,70 +1,118 @@
 #include "app/repositories/UserRepository.hpp"
 
+#include <utility>
+
+#include "app/domain/UserRole.hpp"
 #include "app/errors/AppException.hpp"
 
 namespace app::repositories
 {
 
-BaseRepository::BaseRepository(std::shared_ptr<infrastructure::database::IDatabase> db) : db_(std::move(db))
+namespace
 {
-    if (!db_)
+
+constexpr const char* kTableName = "users";
+
+// Error messages include the username; a missing oatpp::String must read as
+// empty text instead of crashing on dereference.
+std::string textOf(const oatpp::String& value)
+{
+    return value ? std::string(*value) : std::string();
+}
+
+}  // namespace
+
+UserRepository::UserRepository(std::shared_ptr<infrastructure::database::IDatabase> db)
+    : BaseRepository(std::move(db), kTableName)
+{
+}
+
+void UserRepository::checkUser(const oatpp::Object<UserDto>& user)
+{
+    if (!user)
     {
-        throw errors::database::ConnectionFailed("UserRepository requires a database");
+        throw errors::validation::InvalidValue("user is required");
+    }
+
+    if (!user->username || user->username->empty() || !user->passwordHash || user->passwordHash->empty() ||
+        !user->role || user->role->empty())
+    {
+        throw errors::validation::InvalidValue("user fields (username, password_hash, role) must not be empty");
+    }
+
+    domain::UserRole role{};
+    if (!domain::tryParseUserRole(*user->role, role))
+    {
+        throw errors::validation::InvalidValue("unknown user role: '" + textOf(user->role) + "'");
     }
 }
 
 void UserRepository::ensureSchema()
 {
-    db_->executeVoid(
-        "CREATE TABLE IF NOT EXISTS users ("
-        " username TEXT PRIMARY KEY,"
-        " password_hash TEXT NOT NULL,"
-        " role TEXT NOT NULL"
-        ")");
+    createTableImp();
+    if (!tableExists())
+    {
+        throw errors::database::QueryFailed(tableName() + " table is missing after CREATE TABLE IF NOT EXISTS");
+    }
 }
 
-void UserRepository::upsert(const UserRecord& record)
+void UserRepository::createUser(const oatpp::Object<UserDto>& user)
 {
-    if (record.username.empty() || record.passwordHash.empty() || record.role.empty())
+    checkUser(user);
+
+    if (isUserExists(user->username))
     {
-        throw errors::validation::InvalidValue("UserRecord fields must not be empty");
+        throw errors::database::Conflict("username(" + textOf(user->username) + ") already exists");
     }
 
-    db_->executeVoid(
-        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?) "
-        "ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, "
-        "role=excluded.role",
-        {record.username, record.passwordHash, record.role});
+    insertUserImp(user);
 }
 
-std::optional<UserRecord> UserRepository::findByUsername(const std::string& username)
+void UserRepository::updateUser(const oatpp::Object<UserDto>& user)
 {
-    const auto rows = db_->execute("SELECT username, password_hash, role FROM users WHERE username = ?", {username});
-    if (rows.empty())
+    checkUser(user);
+
+    updateUserImp(user);
+    if (!isUserExists(user->username))
     {
-        return std::nullopt;
+        throw errors::database::RecordNotFound("username(" + textOf(user->username) + ") does not exist");
+    }
+}
+
+oatpp::Object<UserDto> UserRepository::getUser(const oatpp::String& username)
+{
+    const auto result = findUserImp(username);
+    const auto rows = fetch<oatpp::Vector<oatpp::Object<UserDto>>>(result);
+
+    if (rows->empty())
+    {
+        throw errors::database::RecordNotFound("username(" + textOf(username) + ") does not exist");
     }
 
-    return UserRecord{rows[0][0], rows[0][1], rows[0][2]};
-}
-
-std::vector<UserRecord> UserRepository::listAll()
-{
-    const auto rows = db_->execute("SELECT username, password_hash, role FROM users ORDER BY username");
-    std::vector<UserRecord> out;
-    out.reserve(rows.size());
-
-    for (const auto& r : rows)
+    if (rows->size() > 1)
     {
-        out.push_back(UserRecord{r[0], r[1], r[2]});
+        throw errors::database::Conflict("found duplicate rows for username(" + textOf(username) + ")");
     }
 
-    return out;
+    return rows->front();
 }
 
-void UserRepository::remove(const std::string& username)
+bool UserRepository::isUserExists(const oatpp::String& username)
 {
-    db_->executeVoid("DELETE FROM users WHERE username = ?", {username});
+    const auto result = userExistsImp(username);
+    const auto rows = fetch<oatpp::Vector<oatpp::Fields<oatpp::Int64>>>(result);
+    return !rows->empty() && rows->front()["count"].getValue(0) > 0;
+}
+
+oatpp::Vector<oatpp::Object<UserDto>> UserRepository::listUsers()
+{
+    const auto result = listUsersImp();
+    return fetch<oatpp::Vector<oatpp::Object<UserDto>>>(result);
+}
+
+void UserRepository::deleteUser(const oatpp::String& username)
+{
+    deleteUserImp(username);
 }
 
 }  // namespace app::repositories

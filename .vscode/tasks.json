@@ -44,7 +44,7 @@
             "command": "cmake --preset debug",
             "group": "build",
             "problemMatcher": "$gcc",
-            "detail": "Debug + ASan/UBSan"
+            "detail": "Debug (no sanitizers)"
         },
         {
             "label": "Preset: Build (debug)",
@@ -55,7 +55,7 @@
                 "Preset: Configure (debug)"
             ],
             "problemMatcher": "$gcc",
-            "detail": "Debug + ASan/UBSan"
+            "detail": "Debug (no sanitizers)"
         },
         {
             "label": "Preset: Test (debug)",
@@ -66,7 +66,7 @@
                 "Preset: Build (debug)"
             ],
             "problemMatcher": [],
-            "detail": "Debug + ASan/UBSan"
+            "detail": "Debug (no sanitizers)"
         },
         {
             "label": "Preset: Install (debug)",
@@ -83,6 +83,55 @@
             "label": "Preset: Workflow (debug)",
             "type": "shell",
             "command": "cmake --workflow --preset debug",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug (no sanitizers)"
+        },
+        {
+            "label": "Preset: Configure (debug-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --preset debug-asan-ubsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (debug-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-asan-ubsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-asan-ubsan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (debug-asan-ubsan)",
+            "type": "shell",
+            "command": "ctest --preset debug-asan-ubsan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-asan-ubsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (debug-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --install build/debug-asan-ubsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-asan-ubsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-asan-ubsan/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-asan-ubsan",
             "group": "build",
             "problemMatcher": "$gcc",
             "detail": "Debug + ASan/UBSan"
@@ -191,7 +240,7 @@
             "command": "cmake --preset relwithdebinfo",
             "group": "build",
             "problemMatcher": "$gcc",
-            "detail": "RelWithDebInfo + ASan/UBSan"
+            "detail": "RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Build (relwithdebinfo)",
@@ -202,7 +251,7 @@
                 "Preset: Configure (relwithdebinfo)"
             ],
             "problemMatcher": "$gcc",
-            "detail": "RelWithDebInfo + ASan/UBSan"
+            "detail": "RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Test (relwithdebinfo)",
@@ -213,7 +262,7 @@
                 "Preset: Build (relwithdebinfo)"
             ],
             "problemMatcher": [],
-            "detail": "RelWithDebInfo + ASan/UBSan"
+            "detail": "RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Install (relwithdebinfo)",
@@ -230,6 +279,55 @@
             "label": "Preset: Workflow (relwithdebinfo)",
             "type": "shell",
             "command": "cmake --workflow --preset relwithdebinfo",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo (no sanitizers)"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-asan-ubsan",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-asan-ubsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-asan-ubsan)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-asan-ubsan)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-asan-ubsan",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-asan-ubsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-asan-ubsan",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-asan-ubsan)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-asan-ubsan/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-asan-ubsan)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-asan-ubsan",
             "group": "build",
             "problemMatcher": "$gcc",
             "detail": "RelWithDebInfo + ASan/UBSan"
@@ -414,7 +512,7 @@
             "command": "cmake --preset debug-ninja",
             "group": "build",
             "problemMatcher": "$gcc",
-            "detail": "(Ninja) Debug + ASan/UBSan"
+            "detail": "(Ninja) Debug (no sanitizers)"
         },
         {
             "label": "Preset: Build (debug-ninja)",
@@ -425,7 +523,7 @@
                 "Preset: Configure (debug-ninja)"
             ],
             "problemMatcher": "$gcc",
-            "detail": "(Ninja) Debug + ASan/UBSan"
+            "detail": "(Ninja) Debug (no sanitizers)"
         },
         {
             "label": "Preset: Test (debug-ninja)",
@@ -436,7 +534,7 @@
                 "Preset: Build (debug-ninja)"
             ],
             "problemMatcher": [],
-            "detail": "(Ninja) Debug + ASan/UBSan"
+            "detail": "(Ninja) Debug (no sanitizers)"
         },
         {
             "label": "Preset: Install (debug-ninja)",
@@ -453,6 +551,55 @@
             "label": "Preset: Workflow (debug-ninja)",
             "type": "shell",
             "command": "cmake --workflow --preset debug-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug (no sanitizers)"
+        },
+        {
+            "label": "Preset: Configure (debug-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset debug-asan-ubsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (debug-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset debug-asan-ubsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (debug-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (debug-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset debug-asan-ubsan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (debug-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) Debug + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (debug-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/debug-asan-ubsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (debug-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/debug-asan-ubsan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (debug-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset debug-asan-ubsan-ninja",
             "group": "build",
             "problemMatcher": "$gcc",
             "detail": "(Ninja) Debug + ASan/UBSan"
@@ -561,7 +708,7 @@
             "command": "cmake --preset relwithdebinfo-ninja",
             "group": "build",
             "problemMatcher": "$gcc",
-            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+            "detail": "(Ninja) RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Build (relwithdebinfo-ninja)",
@@ -572,7 +719,7 @@
                 "Preset: Configure (relwithdebinfo-ninja)"
             ],
             "problemMatcher": "$gcc",
-            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+            "detail": "(Ninja) RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Test (relwithdebinfo-ninja)",
@@ -583,7 +730,7 @@
                 "Preset: Build (relwithdebinfo-ninja)"
             ],
             "problemMatcher": [],
-            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+            "detail": "(Ninja) RelWithDebInfo (no sanitizers)"
         },
         {
             "label": "Preset: Install (relwithdebinfo-ninja)",
@@ -600,6 +747,55 @@
             "label": "Preset: Workflow (relwithdebinfo-ninja)",
             "type": "shell",
             "command": "cmake --workflow --preset relwithdebinfo-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo (no sanitizers)"
+        },
+        {
+            "label": "Preset: Configure (relwithdebinfo-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --preset relwithdebinfo-asan-ubsan-ninja",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Build (relwithdebinfo-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --build --preset relwithdebinfo-asan-ubsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Configure (relwithdebinfo-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": "$gcc",
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Test (relwithdebinfo-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "ctest --preset relwithdebinfo-asan-ubsan-ninja",
+            "group": "test",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"
+        },
+        {
+            "label": "Preset: Install (relwithdebinfo-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --install build/relwithdebinfo-asan-ubsan-ninja",
+            "group": "build",
+            "dependsOn": [
+                "Preset: Build (relwithdebinfo-asan-ubsan-ninja)"
+            ],
+            "problemMatcher": [],
+            "detail": "Stage runnable tree into build/relwithdebinfo-asan-ubsan-ninja/out"
+        },
+        {
+            "label": "Preset: Workflow (relwithdebinfo-asan-ubsan-ninja)",
+            "type": "shell",
+            "command": "cmake --workflow --preset relwithdebinfo-asan-ubsan-ninja",
             "group": "build",
             "problemMatcher": "$gcc",
             "detail": "(Ninja) RelWithDebInfo + ASan/UBSan"

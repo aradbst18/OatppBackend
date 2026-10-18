@@ -96,21 +96,22 @@ std::shared_ptr<oatpp::swagger::DocumentInfo> createDocumentInfo()
             "UI.")
         .setVersion(APP_VERSION)
         .addServer("http://localhost:8080", "Local development server")
-        .addSecurityScheme("bearer_auth", oatpp::swagger::DocumentInfo::SecuritySchemeBuilder()
-                                              .setType("http")
-                                              .setScheme("bearer")
-                                              .setBearerFormat("JWT")
-                                              .setDescription("JWT access token from POST /auth/login. "
-                                                              "Click Authorize and enter `Bearer <token>` (or just the raw "
-                                                              "token — Swagger UI adds the scheme). Sent as "
-                                                              "`Authorization: Bearer <token>`.")
-                                              .build());
+        .addSecurityScheme("bearer_auth",
+                           oatpp::swagger::DocumentInfo::SecuritySchemeBuilder()
+                               .setType("http")
+                               .setScheme("bearer")
+                               .setBearerFormat("JWT")
+                               .setDescription("JWT access token from POST /auth/login. "
+                                               "Click Authorize and enter `Bearer <token>` (or just the raw "
+                                               "token — Swagger UI adds the scheme). Sent as "
+                                               "`Authorization: Bearer <token>`.")
+                               .build());
 
     return builder.build();
 }
 
-void registerSwaggerWithEndpoints(const std::shared_ptr<oatpp::web::server::HttpRouter>& router, const oatpp::web::server::api::Endpoints& endpoints,
-                                  const std::string& resPath)
+void registerSwaggerWithEndpoints(const std::shared_ptr<oatpp::web::server::HttpRouter>& router,
+                                  const oatpp::web::server::api::Endpoints& endpoints, const std::string& resPath)
 {
     auto docInfo = createDocumentInfo();
     auto resources = oatpp::swagger::Resources::loadResources(resolveSwaggerResPath(resPath));
@@ -132,7 +133,8 @@ void registerSwaggerWithEndpoints(const std::shared_ptr<oatpp::web::server::Http
     deserializerConfig->allowUnknownFields = false;
 
     auto objectMapper = oatpp::parser::json::mapping::ObjectMapper::createShared(serializerConfig, deserializerConfig);
-    auto controller = std::make_shared<oatpp::swagger::Controller>(objectMapper, document, resources, oatpp::swagger::ControllerPaths{});
+    auto controller = std::make_shared<oatpp::swagger::Controller>(objectMapper, document, resources,
+                                                                   oatpp::swagger::ControllerPaths{});
     router->addController(controller);
 }
 

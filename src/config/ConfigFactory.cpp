@@ -38,12 +38,16 @@ const char* activeFormatName() noexcept
 {
 #if defined(APP_CONFIG_JSON)
     return "JSON";
+
 #elif defined(APP_CONFIG_TOML)
     return "TOML";
+
 #elif defined(APP_CONFIG_XML)
     return "XML";
+
 #elif defined(APP_CONFIG_YAML)
     return "YAML";
+
 #else
 #error "No APP_CONFIG_* define set (cmake/options.cmake)"
 #endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)

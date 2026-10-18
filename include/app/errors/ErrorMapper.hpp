@@ -31,15 +31,16 @@ class AppErrorHandler : public oatpp::web::server::handler::ErrorHandler
 public:
     static std::shared_ptr<AppErrorHandler> createShared();
 
-    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> handleError(const std::exception_ptr& exceptionPtr) override;
+    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> handleError(
+        const std::exception_ptr& exceptionPtr) override;
 
-    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> handleError(const oatpp::web::protocol::http::Status& status,
-                                                                                const oatpp::String& message,
-                                                                                const oatpp::web::protocol::http::Headers& headers) override;
+    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> handleError(
+        const oatpp::web::protocol::http::Status& status, const oatpp::String& message,
+        const oatpp::web::protocol::http::Headers& headers) override;
 
 private:
-    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createErrorResponse(const oatpp::web::protocol::http::Status& status,
-                                                                                        const std::string& message = "");
+    std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createErrorResponse(
+        const oatpp::web::protocol::http::Status& status, const std::string& message = "");
 };
 
 /// Map a domain ErrorCode to its HTTP Status (shared by handler + controllers).
@@ -47,7 +48,7 @@ oatpp::web::protocol::http::Status statusFor(ErrorCode code);
 
 /// Build a `text/plain` error response for non-controller contexts
 /// (e.g. `AuthInterceptor`, which cannot use `ApiController::createResponse`).
-std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createTextError(const oatpp::web::protocol::http::Status& status,
-                                                                                const std::string& message = "");
+std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createTextError(
+    const oatpp::web::protocol::http::Status& status, const std::string& message = "");
 
 }  // namespace app::errors

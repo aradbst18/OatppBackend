@@ -1,13 +1,15 @@
 # Install rules for OatppBackend.
 #
-# Layout: `bin/oatpp-backend` plus, only when APP_ENABLE_SWAGGER=ON, `share/swagger-res/` (Swagger UI assets). No config or version files are
-# installed: the app creates `configs/app.conf` from defaults on first startup when missing (see Application::loadSettingsOrDefaults) and rewrites
-# `configs/version.conf` on every startup (see Application::initInfrastructure). The checked-in `configs/app.{json,toml,xml,yaml}` are samples;
-# installing all four would ship dead weight, mostly in the wrong format for the active build.
+# Layout: `bin/oatpp-backend` plus, only when APP_ENABLE_SWAGGER=ON, `share/swagger-res/` (Swagger UI assets). No config
+# or version files are installed: the app creates `configs/app.conf` from defaults on first startup when missing (see
+# Application::loadSettingsOrDefaults) and rewrites `configs/version.conf` on every startup (see
+# Application::initInfrastructure). The checked-in `configs/app.{json,toml,xml,yaml}` are samples; installing all four
+# would ship dead weight, mostly in the wrong format for the active build.
 #
-# Swagger res lookup: -DAPP_SWAGGER_RES_DIR=... wins; otherwise the oatpp-swagger install next to OATPP_BASE_DIR, then well-known prefixes, then the
-# vendored copy under external/libs. The found source dir is baked in as OATPP_SWAGGER_RES_PATH for dev runs (binary in build/<preset>/); installed
-# runs (out/bin/oatpp-backend) prefer the exe-relative ../share/swagger-res copy at runtime (see Swagger.cpp).
+# Swagger res lookup: -DAPP_SWAGGER_RES_DIR=... wins; otherwise the oatpp-swagger install next to OATPP_BASE_DIR, then
+# well-known prefixes, then the vendored copy under external/libs. The found source dir is baked in as
+# OATPP_SWAGGER_RES_PATH for dev runs (binary in build/<preset>/); installed runs (out/bin/oatpp-backend) prefer the
+# exe-relative ../share/swagger-res copy at runtime (see Swagger.cpp).
 
 function(setup_install_rules)
     install(TARGETS app_server RUNTIME DESTINATION bin)
@@ -44,7 +46,7 @@ function(setup_install_rules)
     else()
         message(
             WARNING
-                "APP_ENABLE_SWAGGER=ON but Swagger UI res dir not found (tried APP_SWAGGER_RES_DIR='${APP_SWAGGER_RES_DIR}'); /swagger/ui will fail at runtime"
-        )
+                "APP_ENABLE_SWAGGER=ON but Swagger UI res dir not found (tried APP_SWAGGER_RES_DIR='${APP_SWAGGER_RES_DIR}'); "
+                "/swagger/ui will fail at runtime")
     endif()
 endfunction()

@@ -11,7 +11,7 @@
 namespace app::middlewares
 {
 
-/// Bundle key under which verified claims are stored for controllers.
+/// Bundle key under which verified claims (dto::AuthClaimsDto) are stored for controllers.
 constexpr const char* kClaimsBundleKey = "app.auth.claims";
 
 /**
@@ -19,7 +19,7 @@ constexpr const char* kClaimsBundleKey = "app.auth.claims";
  *
  * - Public paths (login, swagger, docs) pass through untouched.
  * - Every other path requires `Authorization: Bearer <jwt>`; valid tokens are
- *   verified and their subject/role stored in the request bundle.
+ *   verified and their claims stored as dto::AuthClaimsDto in the request bundle.
  * - Failures short-circuit with a 401 JSON error (never throws past oatpp).
  */
 class AuthInterceptor : public oatpp::web::server::interceptor::RequestInterceptor

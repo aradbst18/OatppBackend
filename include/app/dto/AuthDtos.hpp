@@ -31,6 +31,7 @@ class LoginResponseDto : public oatpp::DTO
 
 #ifdef APP_WITH_SWAGGER
     DTO_FIELD_INFO(accessToken);
+    DTO_FIELD_INFO(refreshToken);
     DTO_FIELD_INFO(tokenType);
     DTO_FIELD_INFO(username);
     DTO_FIELD_INFO(role);
@@ -38,10 +39,23 @@ class LoginResponseDto : public oatpp::DTO
 #endif  // APP_WITH_SWAGGER
 
     DTO_FIELD(String, accessToken, "access_token");
+    DTO_FIELD(String, refreshToken, "refresh_token");
     DTO_FIELD(String, tokenType, "token_type");
     DTO_FIELD(String, username);
     DTO_FIELD(String, role);
     DTO_FIELD(Int64, expiresIn, "expires_in");
+};
+
+/// POST /auth/refresh request body.
+class RefreshRequestDto : public oatpp::DTO
+{
+    DTO_INIT(RefreshRequestDto, DTO /* Extends */)
+
+#ifdef APP_WITH_SWAGGER
+    DTO_FIELD_INFO(refreshToken);
+#endif  // APP_WITH_SWAGGER
+
+    DTO_FIELD(String, refreshToken, "refresh_token");
 };
 
 /// GET /auth/who-am-i response body.
@@ -58,6 +72,16 @@ class WhoAmIResponseDto : public oatpp::DTO
     DTO_FIELD(String, message);
     DTO_FIELD(String, username);
     DTO_FIELD(String, role);
+};
+
+/// Verified token claims stashed in request bundle by AuthInterceptor.
+class AuthClaimsDto : public oatpp::DTO
+{
+    DTO_INIT(AuthClaimsDto, DTO /* Extends */)
+
+    DTO_FIELD(String, subject);
+    DTO_FIELD(String, role);
+    DTO_FIELD(String, issuer);
 };
 
 }  // namespace app::dto

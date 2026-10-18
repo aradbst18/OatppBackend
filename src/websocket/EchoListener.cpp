@@ -52,7 +52,8 @@ void EchoListener::readMessage(const WebSocket& socket, v_uint8 opcode, p_char8 
     }
 }
 
-void EchoInstanceListener::onAfterCreate(const oatpp::websocket::WebSocket& socket, const std::shared_ptr<const ParameterMap>& params)
+void EchoInstanceListener::onAfterCreate(const oatpp::websocket::WebSocket& socket,
+                                         const std::shared_ptr<const ParameterMap>& params)
 {
     (void)params;
     sockets_.fetch_add(1);

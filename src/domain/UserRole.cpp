@@ -14,6 +14,7 @@ const char* toString(UserRole role) noexcept
         case UserRole::Admin:
             return "admin";
     }
+
     return "unknown";
 }
 

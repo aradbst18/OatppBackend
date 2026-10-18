@@ -13,6 +13,12 @@ struct TokenClaims
     std::string issuer;
     std::chrono::system_clock::time_point issuedAt{};
     std::chrono::system_clock::time_point expiresAt{};
+
+    TokenClaims() = default;
+    TokenClaims(TokenClaims&&) noexcept = default;
+    TokenClaims& operator=(TokenClaims&&) noexcept = default;
+    TokenClaims(const TokenClaims&) = default;
+    TokenClaims& operator=(const TokenClaims&) = default;
 };
 
 /**
@@ -42,6 +48,11 @@ public:
     const std::string& issuer() const noexcept
     {
         return issuer_;
+    }
+
+    std::chrono::seconds ttl() const noexcept
+    {
+        return ttl_;
     }
 
 private:

@@ -10,13 +10,18 @@
 # Usage: scripts/test_matrix.sh [debug|release]   (default: debug)
 #
 # Env (space-separated subsets; defaults = everything):
-#   MATRIX_BACKENDS="SQLITE SQLCIPHER"
+#   MATRIX_BACKENDS="SQLCIPHER"   # file user-database encryption variants under test (ENCRYPTION ON/OFF x formats/features)
 #   MATRIX_FORMATS="JSON TOML XML YAML"
 #   MATRIX_FEATURES="full swagger zlib minimal"
 #   MATRIX_PARSERS=1   # also run parser-exclusion builds + fail-fast negatives
 #   MATRIX_VERSION_FORMATS="JSON"  # version-file formats to exercise
 #                                  # (same four options / parser rules as
 #                                  # APP_CONFIG_FORMAT; space-separated)
+#   MATRIX_PG="auto"   # PostgreSQL users-database combos: "auto" runs them only
+#                      # when a server answers at $PGHOST:$PGPORT (else skipped
+#                      # with a note), "1" runs unconditionally, "0" skips.
+#                      # Reachable-server tests use PGHOST/PGPORT/PGDATABASE/
+#                      # PGUSER/PGPASSWORD (see docs/testing.md).
 #   MATRIX_TESTS=1     # 0 skips building/running tests (build-only matrix)
 #   JOBS=$(nproc)      # build parallelism
 #   GENERATOR=""       # e.g. GENERATOR=Ninja to pass -G explicitly
@@ -39,7 +44,8 @@ case "$BUILD_TYPE" in
         ;;
 esac
 
-DB_BACKENDS=${MATRIX_BACKENDS:-"SQLITE SQLCIPHER"}
+DB_BACKENDS=${MATRIX_BACKENDS:-"SQLCIPHER"}
+PG_MODE=${MATRIX_PG:-"auto"}
 DFG_FORMATS=${MATRIX_FORMATS:-"JSON TOML XML YAML"}
 FEATURES=${MATRIX_FEATURES:-"full swagger zlib minimal"}
 PARSERS=${MATRIX_PARSERS:-1}
@@ -142,27 +148,43 @@ feature_flags() { # <feat> -> prints "-D... -D..."
     esac
 }
 
-# --- main matrix: every backend x format x feature, all parsers on ---
+# --- main matrix: every backend x encryption x format x feature, all parsers on ---
+# (SQLCIPHER runs encrypted and plaintext; POSTGRESQL only runs unencrypted —
+# PG encryption is not implemented, see docs/roadmap/postgresql_encryption.md.)
+
 # shellcheck disable=SC2206
 for be in $DB_BACKENDS; do
-    for fmt in $DFG_FORMATS; do
-        for feat in $FEATURES; do
-            # shellcheck disable=SC2086
-            run_case "$(lower "$BUILD_TYPE")-$(lower "$be")-$(lower "$fmt")-$feat" \
-                -DAPP_DATABASE_BACKEND="$be" -DAPP_CONFIG_FORMAT="$fmt" \
-                $(feature_flags "$feat") \
-                -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
-                -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+    case "$be" in
+        POSTGRESQL)
+            encs="OFF"
+            ;;
+        *)
+            encs="ON OFF"
+            ;;
+    esac
+    for enc in $encs; do
+        for fmt in $DFG_FORMATS; do
+            for feat in $FEATURES; do
+                # shellcheck disable=SC2086
+                run_case "$(lower "$BUILD_TYPE")-$(lower "$be")-enc$(lower "$enc")-$(lower "$fmt")-$feat" \
+                    -DAPP_USERS_DATABASE_TYPE="$be" -DAPP_ENCRYPTION_USER_DATABASE="$enc" -DAPP_CONFIG_FORMAT="$fmt" \
+                    $(feature_flags "$feat") \
+                    -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
+                    -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+            done
         done
     done
 done
 
 if [[ "$PARSERS" == "1" ]]; then
     # --- parser exclusion: each format with ONLY its own parser, minimal ---
+    # (the version file format follows the config format, so APP_VERSION_FILE_FORMAT
+    # never requires a parser that this case has disabled)
     for fmt in $DFG_FORMATS; do
         # shellcheck disable=SC2086
         run_case "$(lower "$BUILD_TYPE")-excl-$(lower "$fmt")" \
-            -DAPP_DATABASE_BACKEND=SQLITE -DAPP_CONFIG_FORMAT="$fmt" \
+            -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT="$fmt" \
+            -DAPP_VERSION_FILE_FORMAT="$fmt" \
             $(feature_flags minimal) \
             -DAPP_ENABLE_JSON_PARSER=$([[ "$fmt" == "JSON" ]] && echo ON || echo OFF) \
             -DAPP_ENABLE_XML_PARSER=$([[ "$fmt" == "XML" ]] && echo ON || echo OFF) \
@@ -187,7 +209,7 @@ if [[ "$PARSERS" == "1" ]]; then
     for vfmt in $VFMTS; do
         # shellcheck disable=SC2086
         run_case "$(lower "$BUILD_TYPE")-ver-$(lower "$vfmt")" \
-            -DAPP_DATABASE_BACKEND=SQLITE -DAPP_CONFIG_FORMAT=JSON \
+            -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT=JSON \
             $(feature_flags minimal) \
             -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
             -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON \
@@ -220,6 +242,48 @@ if [[ "$PARSERS" == "1" ]]; then
             -DAPP_ENABLE_XML_PARSER=$([[ "$vfmt" == "XML" ]] && echo OFF || echo ON) \
             -DAPP_ENABLE_YAML_PARSER=$([[ "$vfmt" == "YAML" ]] && echo OFF || echo ON)
     done
+fi
+
+# --- value negatives: unknown enum values must not configure ---
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-bad-users" -DAPP_USERS_DATABASE_TYPE=BOGUS
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-removed-sqlite-value" -DAPP_USERS_DATABASE_TYPE=SQLITE
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-bad-bool" -DAPP_ENCRYPTION_USER_DATABASE=BOGUS
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-pg-without-support" -DAPP_USERS_DATABASE_TYPE=POSTGRESQL -DAPP_ENABLE_POSTGRESQL=OFF
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-sqlcipher-without-support" -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENABLE_SQLCIPHER=OFF
+expect_configure_failure "$(lower "$BUILD_TYPE")-neg-pg-encryption" -DAPP_USERS_DATABASE_TYPE=POSTGRESQL -DAPP_ENABLE_POSTGRESQL=ON \
+    -DAPP_ENCRYPTION_USER_DATABASE=ON
+
+# --- PostgreSQL combos: need a live server ---
+# Gated: "auto" probes with pg_isready, "1" runs unconditionally, anything else skips.
+PG_RUN=0
+if [[ "$PG_MODE" == "1" ]]; then
+    PG_RUN=1
+elif [[ "$PG_MODE" == "auto" ]] && command -v pg_isready >/dev/null 2>&1 &&
+    pg_isready -q -h "${PGHOST:-127.0.0.1}" -p "${PGPORT:-5432}"; then
+    PG_RUN=1
+fi
+
+if [[ "$PG_RUN" == "1" ]]; then
+    # Users database on PostgreSQL, with and without file support alongside it.
+    for file in ON OFF; do
+        # shellcheck disable=SC2086
+        run_case "$(lower "$BUILD_TYPE")-pg-users-sqlcipher-$(lower "$file")" \
+            -DAPP_ENABLE_POSTGRESQL=ON -DAPP_USERS_DATABASE_TYPE=POSTGRESQL -DAPP_ENABLE_SQLCIPHER="$file" \
+            -DAPP_CONFIG_FORMAT=TOML $(feature_flags minimal) \
+            -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
+            -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+    done
+
+    # PostgreSQL support alongside file user databases ("retrieve specific data elsewhere").
+    # shellcheck disable=SC2086
+    run_case "$(lower "$BUILD_TYPE")-pg-alongside-sqlcipher" \
+        -DAPP_ENABLE_POSTGRESQL=ON -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENABLE_SQLCIPHER=ON \
+        -DAPP_ENCRYPTION_USER_DATABASE=OFF \
+        -DAPP_CONFIG_FORMAT=JSON $(feature_flags minimal) \
+        -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
+        -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+else
+    echo "--- [matrix] postgres combos skipped (no server at ${PGHOST:-127.0.0.1}:${PGPORT:-5432}; set MATRIX_PG=1 to force) ---"
 fi
 
 echo "---- matrix summary: $PASS passed, $FAIL failed ----"

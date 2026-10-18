@@ -3,10 +3,12 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "app/auth/JwtService.hpp"
 #include "app/config/AppSettings.hpp"
 #include "app/infrastructure/database/IDatabase.hpp"
+#include "app/repositories/RefreshTokenRepository.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/services/AuthService.hpp"
 
@@ -85,6 +87,7 @@ public:
     std::shared_ptr<services::AuthService> authService();
     std::shared_ptr<auth::JwtService> jwtService();
     std::shared_ptr<infrastructure::database::IDatabase> database();
+    std::shared_ptr<repositories::RefreshTokenRepository> refreshTokenRepository();
 
 private:
     void initInfrastructure();
@@ -104,12 +107,42 @@ private:
 
     std::shared_ptr<infrastructure::database::IDatabase> database_;
     std::shared_ptr<repositories::UserRepository> users_;
+    std::shared_ptr<repositories::RefreshTokenRepository> refreshTokens_;
     std::shared_ptr<auth::JwtService> jwt_;
     std::shared_ptr<services::AuthService> auth_;
 };
 
+/// Operational startup sequence (see docs/configuration.md):
+/// 1) ensureConfigExists: create the config file from per-type defaults when
+///    missing (SQLCIPHER: path, or path+key; POSTGRESQL:
+///    path/key/user/name/port), skip when present (existing files are left
+///    as-is; each backend reads only its own fields).
+/// 2) loadSettings: parse + validate the file.
+/// Steps 1-2 run before logging exists; failures are reported via
+/// writeCriticalLog() (<exeDir>/logs/yyyy-mm-dd.log next to the executable)
+/// and throw.
+/// 3) logging, 4) database, 5) REST/Oatpp, 6) server follow in initialize().
 /// Load settings from file-or-defaults, throwing ConfigurationError with a
 /// clear message when the file is missing/invalid.
 config::AppSettings loadSettingsOrDefaults(const std::string& configPath);
+
+/// Step 1: create the config file from defaults when missing; no-op when present.
+void ensureConfigExists(const std::string& configPath);
+
+/// Step 2: load + validate an existing config file. Absent leaves fall back to
+/// defaults; when `missing` is not null each absent leaf is recorded as a
+/// dotted path so the caller can complete the file.
+config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing = nullptr);
+
+/// Pre-logging failure sink: append one standard-format CRITICAL line to
+/// `<exeDir>/logs/yyyy-mm-dd.log` (the `logs` directory is created next to
+/// the executable when needed). Best effort, never throws. Used only before
+/// the logging system knows its configured destination; afterwards failures
+/// go to the configured log file instead.
+void writeCriticalLog(const std::string& exeDir, const std::string& tag, const std::string& message) noexcept;
+
+/// Directory containing the running executable (parent of argv[0], or "." when
+/// argv[0] carries no directory). Used for the critical log location.
+std::string executableDir(const std::string& argv0);
 
 }  // namespace app::application

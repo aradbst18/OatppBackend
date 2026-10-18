@@ -22,6 +22,7 @@ std::string tmpPath(const char* name)
 TEST_CASE("version: current info carries build version and dates")
 {
     const config::VersionInfo info = config::currentVersionInfo();
+
     EXPECT_EQ(info.version, std::string(APP_VERSION));
     EXPECT_EQ(info.releaseDate, std::string(APP_RELEASE_DATE));
     EXPECT_TRUE(std::regex_match(info.version, std::regex(R"(^\d+\.\d+\.\d+$)")));
@@ -37,18 +38,23 @@ TEST_CASE("version: default path is configs/version.conf")
 TEST_CASE("version: version file format define matches exactly one")
 {
     int active = 0;
-#if defined(APP_VERSION_FILE_JSON)
+
+#ifdef APP_VERSION_FILE_JSON
     ++active;
 #endif  // APP_VERSION_FILE_JSON
-#if defined(APP_VERSION_FILE_TOML)
+
+#ifdef APP_VERSION_FILE_TOML
     ++active;
 #endif  // APP_VERSION_FILE_TOML
-#if defined(APP_VERSION_FILE_XML)
+
+#ifdef APP_VERSION_FILE_XML
     ++active;
 #endif  // APP_VERSION_FILE_XML
-#if defined(APP_VERSION_FILE_YAML)
+
+#ifdef APP_VERSION_FILE_YAML
     ++active;
 #endif  // APP_VERSION_FILE_YAML
+
     EXPECT_EQ(active, 1);
 }
 
@@ -56,10 +62,14 @@ TEST_CASE("version: file contains version, release date and startup time")
 {
     const std::string path = tmpPath("version-check.conf");
     const config::VersionInfo info = config::currentVersionInfo();
+
     config::writeVersionFile(path, info);
+
     const std::string content = infrastructure::readTextFile(path);
+
     EXPECT_TRUE(content.find(info.version) != std::string::npos);
     EXPECT_TRUE(content.find(info.releaseDate) != std::string::npos);
     EXPECT_TRUE(content.find(info.startupTime) != std::string::npos);
+
     std::remove(path.c_str());
 }

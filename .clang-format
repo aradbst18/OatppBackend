@@ -7,7 +7,7 @@ TabWidth: 4
 UseTab: Never
 ContinuationIndentWidth: 4
 BracedInitializerIndentWidth: 4
-ColumnLimit: 150
+ColumnLimit: 120
 # Google default (80) is too tight for oatpp type names; 100 is the
 # documented soft limit. Penalty tuning keeps the formatter from
 # packing too aggressively.

@@ -93,13 +93,14 @@ private:
 
 }  // namespace app::errors
 
-#define DEFINE_APP_EXCEPTION(NAME, CODE, DEFAULT_MESSAGE)                                                                 \
-    class NAME final : public AppException                                                                                \
-    {                                                                                                                     \
-    public:                                                                                                               \
-        explicit NAME(const std::string& message = DEFAULT_MESSAGE) : AppException(app::errors::ErrorCode::CODE, message) \
-        {                                                                                                                 \
-        }                                                                                                                 \
+#define DEFINE_APP_EXCEPTION(NAME, CODE, DEFAULT_MESSAGE)           \
+    class NAME final : public AppException                          \
+    {                                                               \
+    public:                                                         \
+        explicit NAME(const std::string& message = DEFAULT_MESSAGE) \
+            : AppException(app::errors::ErrorCode::CODE, message)   \
+        {                                                           \
+        }                                                           \
     }
 
 namespace app::errors

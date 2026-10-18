@@ -18,7 +18,7 @@ fire only for our code.
 ## Headers and includes
 
 - `#pragma once`. Include order: own header, C/C++ stdlib, third-party
-  (oatpp, jwt-cpp, jsoncpp, toml11, pugixml, openssl, sqlite), then `app/`.
+  (oatpp, jwt-cpp, jsoncpp, toml11, pugixml, openssl, sqlcipher), then `app/`.
 - Forward-declare oatpp server types in headers; include full oatpp headers
   only in `.cpp` files where possible.
 - No `using namespace` in headers.
@@ -50,8 +50,9 @@ fire only for our code.
 
 ## Security
 
-- Bound SQL parameters only; `PRAGMA key` uses `''`-escaped literals (PRAGMA
-  takes no bind params). Verify `PRAGMA cipher_version` at open.
+- Bound SQL parameters only; the SQLCipher key goes through `sqlite3_key()`
+  in the connection provider (never into SQL text) and is validated with a
+  real schema read at open.
 - JWT: HS256, issuer + expiry enforced, 30s leeway. Constant-shape login
   failures. Minimum secret length 8 (tests), production must use a strong
   random secret.

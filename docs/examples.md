@@ -91,14 +91,14 @@ on startup.
   "server": {"host": "127.0.0.1", "port": 8080},
   "database": {"path": "data/app.db"},
   "jwt": {"secret": "change-me-in-production", "issuer": "oatpp-backend", "ttlSeconds": 3600},
-  "logging": {"level": "INFO", "filePath": "logs"}
+  "logging": {"level": "INFO", "path": "logs"}
 }
 ```
 
 TOML, XML, and YAML equivalents live in `configs/app.toml` / `configs/app.xml`
-/ `configs/app.yaml` (same groups and leaf names). `database.key` is required
-in SQLCipher builds and omitted in SQLite builds (see
-[`docs/configuration.md`](docs/configuration.md)).
+/ `configs/app.yaml` (same groups and leaf names). `database.key` is present
+in encrypted SQLCIPHER and POSTGRESQL files and omitted in plaintext SQLCIPHER
+files (see [`docs/configuration.md`](docs/configuration.md)).
 
 ## CMake configurations
 
@@ -109,6 +109,6 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 cmake -S . -B build-min -DAPP_ENABLE_SWAGGER=OFF -DAPP_ENABLE_ZLIB=OFF \
   -DAPP_CONFIG_FORMAT=TOML && cmake --build build-min -j
 # Encrypted database
-cmake -S . -B build-cipher -DAPP_DATABASE_BACKEND=SQLCIPHER \
-  && cmake --build build-cipher -j
+cmake -S . -B build-cipher -DAPP_USERS_DATABASE_TYPE=SQLCIPHER \
+  -DAPP_ENCRYPTION_USER_DATABASE=ON && cmake --build build-cipher -j
 ```

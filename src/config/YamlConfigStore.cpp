@@ -20,18 +20,19 @@ namespace
 // loading defaults.
 void rejectLegacyFlat(const infrastructure::documents::DocumentValue& root, const std::string& source)
 {
-    for (const char* key : {"host", "port", "databasePath", "databaseKey", "jwtSecret", "jwtIssuer", "jwtTtlSeconds", "logLevel", "logFilePath"})
+    for (const char* key : {"host", "port", "databasePath", "databaseKey", "jwtSecret", "jwtIssuer", "jwtTtlSeconds",
+                            "logLevel", "logFilePath"})
     {
         if (root.contains(key))
         {
-            throw errors::config::Invalid(std::string("Unsupported flat key '") + key + "' in " + source + ": expected grouped schema " +
-                                          "(server/database/jwt/logging)");
+            throw errors::config::Invalid(std::string("Unsupported flat key '") + key + "' in " + source +
+                                          ": expected grouped schema " + "(server/database/jwt/logging)");
         }
     }
 }
 
-const infrastructure::documents::DocumentValue* requireGroup(const infrastructure::documents::DocumentValue& root, const char* name,
-                                                             const std::string& source)
+const infrastructure::documents::DocumentValue* requireGroup(const infrastructure::documents::DocumentValue& root,
+                                                             const char* name, const std::string& source)
 {
     const infrastructure::documents::DocumentValue* group = root.find(name);
     if (group != nullptr && !group->isMap())
@@ -44,13 +45,39 @@ const infrastructure::documents::DocumentValue* requireGroup(const infrastructur
 
 }  // namespace
 
-AppSettings YamlConfigStore::load(const std::string& path)
+AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::string>* missing)
 {
     const infrastructure::documents::DocumentValue root = infrastructure::documents::loadYamlFile(path);
     if (root.isNull())
     {
-        // Empty file: keep defaults, still validated below.
+        // Empty file: keep defaults, still validated below. Every leaf counts
+        // as missing so the file gets completed on save-back.
         AppSettings s = AppSettings::defaults();
+        if (missing != nullptr)
+        {
+            *missing = {"server.host",
+                        "server.port",
+                        "database.path",
+#ifdef APP_DATABASE_POSTGRESQL
+                        "database.port",
+                        "database.name",
+                        "database.user",
+#endif  // APP_DATABASE_POSTGRESQL
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+                        "database.key",
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
+                        "jwt.secret",
+                        "jwt.issuer",
+                        "jwt.ttlSeconds",
+                        "logging.level",
+                        "logging.path"
+#ifdef APP_WITH_SWAGGER
+                        ,
+                        "swagger.resPath"
+#endif  // APP_WITH_SWAGGER
+            };
+        }
+
         s.configSource = path;
         const std::string err = s.validate();
         if (!err.empty())
@@ -71,8 +98,21 @@ AppSettings YamlConfigStore::load(const std::string& path)
         rejectLegacyFlat(root, path);
         AppSettings s = AppSettings::defaults();
 
+        auto noteMissing = [missing](const char* group, const char* leaf)
+        {
+            if (missing != nullptr)
+            {
+                missing->push_back(std::string(group) + "." + leaf);
+            }
+        };
+
         if (const infrastructure::documents::DocumentValue* server = requireGroup(root, "server", path))
         {
+            if (!server->contains("host"))
+            {
+                noteMissing("server", "host");
+            }
+
             s.host = infrastructure::documents::stringOr(*server, "host", s.host);
             if (const infrastructure::documents::DocumentValue* port = server->find("port"))
             {
@@ -87,35 +127,114 @@ AppSettings YamlConfigStore::load(const std::string& path)
                     s.port = static_cast<std::uint16_t>(portValue);
                 }
             }
+            else
+            {
+                noteMissing("server", "port");
+            }
+        }
+        else
+        {
+            noteMissing("server", "host");
+            noteMissing("server", "port");
         }
 
         if (const infrastructure::documents::DocumentValue* database = requireGroup(root, "database", path))
         {
+            if (database->contains("host"))
+            {
+                throw errors::config::Invalid("database.host was renamed to database.path in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (database->contains("password"))
+            {
+                throw errors::config::Invalid("database.password was renamed to database.key in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (!database->contains("path"))
+            {
+                noteMissing("database", "path");
+            }
+
             s.databasePath = infrastructure::documents::stringOr(*database, "path", s.databasePath);
-#ifdef APP_DATABASE_SQLCIPHER
-            // The key must be explicitly present: falling back to the built-in
-            // default would hide a misconfigured (unencrypted-by-accident)
-            // deployment.
+
+#ifdef APP_DATABASE_POSTGRESQL
+            if (const infrastructure::documents::DocumentValue* dbPort = database->find("port"))
+            {
+                if (!dbPort->isNull())
+                {
+                    const int portValue = static_cast<int>(dbPort->asInt());
+                    if (portValue < 1 || portValue > 65535)
+                    {
+                        throw errors::config::Invalid("database.port out of range in " + path);
+                    }
+
+                    s.databasePort = static_cast<std::uint16_t>(portValue);
+                }
+            }
+            else
+            {
+                noteMissing("database", "port");
+            }
+
+            if (!database->contains("name"))
+            {
+                noteMissing("database", "name");
+            }
+
+            s.databaseName = infrastructure::documents::stringOr(*database, "name", s.databaseName);
+            if (!database->contains("user"))
+            {
+                noteMissing("database", "user");
+            }
+
+            s.databaseUser = infrastructure::documents::stringOr(*database, "user", s.databaseUser);
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+            // Absent key falls back to the built-in default like any other
+            // missing parameter; a present-but-wrongly-typed key throws below.
+            // If the default key cannot open the database, that connection
+            // failure is the operator's to fix.
             if (database->contains("key"))
             {
                 s.databaseKey = infrastructure::documents::stringOr(*database, "key", "");
             }
             else
             {
-                throw errors::config::Invalid("database.key is required for the SQLCIPHER backend in " + path);
+                noteMissing("database", "key");
             }
-#endif  // APP_DATABASE_SQLCIPHER
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
         else
         {
-#ifdef APP_DATABASE_SQLCIPHER
-            throw errors::config::Invalid("database.key is required for the SQLCIPHER backend in " + path);
-#endif  // APP_DATABASE_SQLCIPHER
+            noteMissing("database", "path");
+
+#ifdef APP_DATABASE_POSTGRESQL
+            noteMissing("database", "port");
+            noteMissing("database", "name");
+            noteMissing("database", "user");
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+            noteMissing("database", "key");
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
 
         if (const infrastructure::documents::DocumentValue* jwt = requireGroup(root, "jwt", path))
         {
+            if (!jwt->contains("secret"))
+            {
+                noteMissing("jwt", "secret");
+            }
+
             s.jwtSecret = infrastructure::documents::stringOr(*jwt, "secret", s.jwtSecret);
+            if (!jwt->contains("issuer"))
+            {
+                noteMissing("jwt", "issuer");
+            }
+
             s.jwtIssuer = infrastructure::documents::stringOr(*jwt, "issuer", s.jwtIssuer);
             if (const infrastructure::documents::DocumentValue* ttl = jwt->find("ttlSeconds"))
             {
@@ -124,18 +243,62 @@ AppSettings YamlConfigStore::load(const std::string& path)
                     s.jwtTtlSeconds = ttl->asInt();
                 }
             }
+            else
+            {
+                noteMissing("jwt", "ttlSeconds");
+            }
+        }
+        else
+        {
+            noteMissing("jwt", "secret");
+            noteMissing("jwt", "issuer");
+            noteMissing("jwt", "ttlSeconds");
         }
 
         if (const infrastructure::documents::DocumentValue* logging = requireGroup(root, "logging", path))
         {
+            if (logging->contains("filePath"))
+            {
+                throw errors::config::Invalid("logging.filePath was renamed to logging.path in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (!logging->contains("level"))
+            {
+                noteMissing("logging", "level");
+            }
+
             s.logLevel = infrastructure::documents::stringOr(*logging, "level", s.logLevel);
-            s.logFilePath = infrastructure::documents::stringOr(*logging, "filePath", s.logFilePath);
+            if (!logging->contains("path"))
+            {
+                noteMissing("logging", "path");
+            }
+
+            s.logPath = infrastructure::documents::stringOr(*logging, "path", s.logPath);
+        }
+        else
+        {
+            noteMissing("logging", "level");
+            noteMissing("logging", "path");
         }
 
         if (const infrastructure::documents::DocumentValue* swagger = requireGroup(root, "swagger", path))
         {
             s.swaggerResPath = infrastructure::documents::stringOr(*swagger, "resPath", s.swaggerResPath);
+
+#ifdef APP_WITH_SWAGGER
+            if (!swagger->contains("resPath"))
+            {
+                noteMissing("swagger", "resPath");
+            }
+#endif  // APP_WITH_SWAGGER
         }
+#ifdef APP_WITH_SWAGGER
+        else
+        {
+            noteMissing("swagger", "resPath");
+        }
+#endif  // APP_WITH_SWAGGER
 
         s.configSource = path;
         const std::string err = s.validate();
@@ -171,9 +334,15 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings)
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();
     database["path"] = settings.databasePath;
 
-#ifdef APP_DATABASE_SQLCIPHER
+#ifdef APP_DATABASE_POSTGRESQL
+    database["port"] = static_cast<std::int64_t>(settings.databasePort);
+    database["name"] = settings.databaseName;
+    database["user"] = settings.databaseUser;
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
     database["key"] = settings.databaseKey;
-#endif  // APP_DATABASE_SQLCIPHER
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
 
     infrastructure::documents::DocumentValue jwt = infrastructure::documents::DocumentValue::makeMap();
     jwt["secret"] = settings.jwtSecret;
@@ -182,7 +351,7 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings)
 
     infrastructure::documents::DocumentValue logging = infrastructure::documents::DocumentValue::makeMap();
     logging["level"] = settings.logLevel;
-    logging["filePath"] = settings.logFilePath;
+    logging["path"] = settings.logPath;
 
     infrastructure::documents::DocumentValue root = infrastructure::documents::DocumentValue::makeMap();
     root["server"] = std::move(server);

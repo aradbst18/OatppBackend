@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "app/config/AppSettings.hpp"
 
@@ -31,8 +32,16 @@ class IConfigStore
 {
 public:
     virtual ~IConfigStore() = default;
-    virtual AppSettings load(const std::string& path) = 0;
+
+    /// Load settings, filling absent leaves from defaults. When `missing` is not
+    /// null, every absent leaf is recorded as a dotted path (e.g.
+    /// "jwt.secret") so the caller can complete the file. Present-but-wrong
+    /// typed leaves and invalid values still throw; nothing is recorded for
+    /// them because loading aborts.
+    virtual AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) = 0;
+
     virtual void save(const std::string& path, const AppSettings& settings) = 0;
+
     virtual const char* formatName() const noexcept = 0;
 };
 
@@ -40,8 +49,10 @@ public:
 class JsonConfigStore : public IConfigStore
 {
 public:
-    AppSettings load(const std::string& path) override;
+    AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
+
     void save(const std::string& path, const AppSettings& settings) override;
+
     const char* formatName() const noexcept override
     {
         return "JSON";
@@ -53,8 +64,10 @@ public:
 class TomlConfigStore : public IConfigStore
 {
 public:
-    AppSettings load(const std::string& path) override;
+    AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
+
     void save(const std::string& path, const AppSettings& settings) override;
+
     const char* formatName() const noexcept override
     {
         return "TOML";
@@ -66,8 +79,10 @@ public:
 class XmlConfigStore : public IConfigStore
 {
 public:
-    AppSettings load(const std::string& path) override;
+    AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
+
     void save(const std::string& path, const AppSettings& settings) override;
+
     const char* formatName() const noexcept override
     {
         return "XML";
@@ -79,8 +94,10 @@ public:
 class YamlConfigStore : public IConfigStore
 {
 public:
-    AppSettings load(const std::string& path) override;
+    AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
+
     void save(const std::string& path, const AppSettings& settings) override;
+
     const char* formatName() const noexcept override
     {
         return "YAML";

@@ -14,8 +14,11 @@ namespace app::infrastructure::documents
  * mappings become Maps. An empty document parses as Null.
  */
 DocumentValue parseYaml(const std::string& text, const std::string& source);
+
 std::string serializeYaml(const DocumentValue& value);
+
 DocumentValue loadYamlFile(const std::string& path);
+
 void saveYamlFile(const std::string& path, const DocumentValue& value);
 
 }  // namespace app::infrastructure::documents

@@ -15,8 +15,11 @@ namespace app::infrastructure::documents
  * originating source path embedded.
  */
 DocumentValue parseJson(const std::string& text, const std::string& source);
+
 std::string serializeJson(const DocumentValue& value);
+
 DocumentValue loadJsonFile(const std::string& path);
+
 void saveJsonFile(const std::string& path, const DocumentValue& value);
 
 }  // namespace app::infrastructure::documents

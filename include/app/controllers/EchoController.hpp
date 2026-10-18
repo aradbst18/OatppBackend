@@ -25,7 +25,8 @@ namespace app::controllers
 class EchoController : public oatpp::web::server::api::ApiController
 {
 public:
-    EchoController(const std::shared_ptr<ObjectMapper>& objectMapper, std::shared_ptr<oatpp::network::ConnectionHandler> websocketHandler);
+    EchoController(const std::shared_ptr<ObjectMapper>& objectMapper,
+                   std::shared_ptr<oatpp::network::ConnectionHandler> websocketHandler);
 
 #if defined(APP_WITH_SWAGGER)
     ENDPOINT_INFO(wsEcho);

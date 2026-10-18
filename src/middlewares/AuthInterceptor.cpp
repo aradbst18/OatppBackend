@@ -1,6 +1,7 @@
 #include "app/middlewares/AuthInterceptor.hpp"
 
 #include "app/auth/JwtService.hpp"
+#include "app/dto/AuthDtos.hpp"
 #include "app/errors/AppException.hpp"
 
 namespace app::middlewares
@@ -14,9 +15,9 @@ AuthInterceptor::AuthInterceptor(std::shared_ptr<auth::JwtService> jwt) : jwt_(s
     }
 
     publicPaths_ = {
-        "POST /auth/login", "GET /ws/echo",
+        "POST /auth/login", "POST /auth/refresh", "GET /ws/echo",
 #ifdef APP_WITH_SWAGGER
-        "GET /swagger/*",   "GET /api-docs/*", "GET /swagger/ui",
+        "GET /swagger/*",   "GET /api-docs/*",    "GET /swagger/ui",
 #endif  // APP_WITH_SWAGGER
     };
 }
@@ -41,7 +42,8 @@ bool AuthInterceptor::isPublicPath(const std::string& method, const std::string&
     return false;
 }
 
-std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(const std::shared_ptr<IncomingRequest>& request)
+std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(
+    const std::shared_ptr<IncomingRequest>& request)
 {
     const std::string method = request->getStartingLine().method.std_str();
     const std::string path = request->getStartingLine().path.std_str();
@@ -59,9 +61,13 @@ std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(co
     const std::string token = auth::JwtService::extractBearer(header);
     const auth::TokenClaims claims = jwt_->verify(token);
 
-    // Stash subject/role for controllers: "subject|role|issuer".
-    const std::string packed = claims.subject + "|" + claims.role + "|" + claims.issuer;
-    request->putBundleData(kClaimsBundleKey, oatpp::String(packed.c_str()));
+    // Stash verified claims in request bundle as a typed DTO.
+    auto claimsDto = dto::AuthClaimsDto::createShared();
+    claimsDto->subject = oatpp::String(claims.subject);
+    claimsDto->role = oatpp::String(claims.role);
+    claimsDto->issuer = oatpp::String(claims.issuer);
+
+    request->putBundleData(kClaimsBundleKey, claimsDto);
     return nullptr;
 }
 

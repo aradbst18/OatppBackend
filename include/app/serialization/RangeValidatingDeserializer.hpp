@@ -22,8 +22,8 @@ namespace app::serialization
  * Registered for every oatpp integer/float type in AppObjectMapper.hpp.
  */
 template <typename Wrapper, std::int64_t Min, std::int64_t Max>
-oatpp::Void deserializeSignedIntWithRange(oatpp::parser::json::mapping::Deserializer* deserializer, oatpp::parser::Caret& caret,
-                                          const oatpp::Type* const type)
+oatpp::Void deserializeSignedIntWithRange(oatpp::parser::json::mapping::Deserializer* deserializer,
+                                          oatpp::parser::Caret& caret, const oatpp::Type* const type)
 {
     (void)deserializer;
     (void)type;
@@ -49,8 +49,8 @@ oatpp::Void deserializeSignedIntWithRange(oatpp::parser::json::mapping::Deserial
 }
 
 template <typename Wrapper, std::uint64_t Min, std::uint64_t Max>
-oatpp::Void deserializeUnsignedIntWithRange(oatpp::parser::json::mapping::Deserializer* deserializer, oatpp::parser::Caret& caret,
-                                            const oatpp::Type* const type)
+oatpp::Void deserializeUnsignedIntWithRange(oatpp::parser::json::mapping::Deserializer* deserializer,
+                                            oatpp::parser::Caret& caret, const oatpp::Type* const type)
 {
     (void)deserializer;
     (void)type;
@@ -76,8 +76,8 @@ oatpp::Void deserializeUnsignedIntWithRange(oatpp::parser::json::mapping::Deseri
 }
 
 template <typename Wrapper, typename RangePolicy>
-oatpp::Void deserializeFloatWithRange(oatpp::parser::json::mapping::Deserializer* deserializer, oatpp::parser::Caret& caret,
-                                      const oatpp::Type* const type)
+oatpp::Void deserializeFloatWithRange(oatpp::parser::json::mapping::Deserializer* deserializer,
+                                      oatpp::parser::Caret& caret, const oatpp::Type* const type)
 {
     (void)deserializer;
     (void)type;

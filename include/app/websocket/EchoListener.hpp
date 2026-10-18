@@ -19,9 +19,13 @@ class EchoListener : public oatpp::websocket::WebSocket::Listener
 {
 public:
     ~EchoListener() override = default;
+
     void onPing(const WebSocket& socket, const oatpp::String& message) override;
+
     void onPong(const WebSocket& socket, const oatpp::String& message) override;
+
     void onClose(const WebSocket& socket, v_uint16 code, const oatpp::String& message) override;
+
     void readMessage(const WebSocket& socket, v_uint8 opcode, p_char8 data, oatpp::v_io_size size) override;
 
 private:
@@ -46,7 +50,10 @@ class EchoInstanceListener : public oatpp::websocket::ConnectionHandler::SocketI
 {
 public:
     virtual ~EchoInstanceListener() = default;
-    void onAfterCreate(const oatpp::websocket::WebSocket& socket, const std::shared_ptr<const ParameterMap>& params) override;
+
+    void onAfterCreate(const oatpp::websocket::WebSocket& socket,
+                       const std::shared_ptr<const ParameterMap>& params) override;
+
     void onBeforeDestroy(const oatpp::websocket::WebSocket& socket) override;
 
     std::int32_t liveSockets() const noexcept

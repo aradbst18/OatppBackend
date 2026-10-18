@@ -23,8 +23,9 @@ Location: `include/app/services/`, `src/services/`.
 `AuthService::login(username, password)`:
 
 1. `isValidUsername/isValidPassword` -> `ValidationError` (422).
-2. `users_->findByUsername` + hash compare -> `Unauthorized` (401), with
-   identical failure shape for unknown user vs wrong password.
+2. `users_->getUser` + hash compare -> `Unauthorized` (401), with
+   identical failure shape for unknown user (a `RecordNotFound` from the
+   repository) vs wrong password.
 3. `jwt_->create` -> `LoginResult{accessToken, username, role, expiresIn}`.
 
 Seed data (if any) goes in an explicit `ensureSeeded()` called from

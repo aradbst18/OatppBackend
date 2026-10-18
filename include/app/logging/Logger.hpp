@@ -82,7 +82,8 @@ public:
     static std::string resolveLogFilePath(const std::string& dir);
 
     /// One log line: `HH:MM:SS.mmm [LEVEL] [tag] message`.
-    static std::string formatLine(const std::string& time, Level level, const std::string& tag, const std::string& message);
+    static std::string formatLine(const std::string& time, Level level, const std::string& tag,
+                                  const std::string& message);
 
     void log(Level level, const std::string& tag, const std::string& message);
 
@@ -103,32 +104,69 @@ void log(Level level, const std::string& tag, const std::string& message);
 
 inline void logTrace(const std::string& tag, const std::string& message)
 {
-    log(Level::Trace, tag, message);
+    if (Logger::instance().isEnabled(Level::Trace))
+    {
+        log(Level::Trace, tag, message);
+    }
 }
 
 inline void logDebug(const std::string& tag, const std::string& message)
 {
-    log(Level::Debug, tag, message);
+    if (Logger::instance().isEnabled(Level::Debug))
+    {
+        log(Level::Debug, tag, message);
+    }
 }
 
 inline void logInfo(const std::string& tag, const std::string& message)
 {
-    log(Level::Info, tag, message);
+    if (Logger::instance().isEnabled(Level::Info))
+    {
+        log(Level::Info, tag, message);
+    }
 }
 
 inline void logWarn(const std::string& tag, const std::string& message)
 {
-    log(Level::Warn, tag, message);
+    if (Logger::instance().isEnabled(Level::Warn))
+    {
+        log(Level::Warn, tag, message);
+    }
 }
 
 inline void logError(const std::string& tag, const std::string& message)
 {
-    log(Level::Error, tag, message);
+    if (Logger::instance().isEnabled(Level::Error))
+    {
+        log(Level::Error, tag, message);
+    }
 }
 
 inline void logCritical(const std::string& tag, const std::string& message)
 {
-    log(Level::Critical, tag, message);
+    if (Logger::instance().isEnabled(Level::Critical))
+    {
+        log(Level::Critical, tag, message);
+    }
 }
 
 }  // namespace app::logging
+
+/// Lazy logging macros that avoid evaluating the message expression if the level is disabled.
+#define APP_LOG_IS_ENABLED(lvl) (::app::logging::Logger::instance().isEnabled(::app::logging::Level::lvl))
+
+#define APP_LOG(lvl, tag, expr)                                                       \
+    do                                                                                \
+    {                                                                                 \
+        if (::app::logging::Logger::instance().isEnabled(::app::logging::Level::lvl)) \
+        {                                                                             \
+            ::app::logging::log(::app::logging::Level::lvl, (tag), (expr));           \
+        }                                                                             \
+    } while (false)
+
+#define APP_LOG_TRACE(tag, expr) APP_LOG(Trace, tag, expr)
+#define APP_LOG_DEBUG(tag, expr) APP_LOG(Debug, tag, expr)
+#define APP_LOG_INFO(tag, expr) APP_LOG(Info, tag, expr)
+#define APP_LOG_WARN(tag, expr) APP_LOG(Warn, tag, expr)
+#define APP_LOG_ERROR(tag, expr) APP_LOG(Error, tag, expr)
+#define APP_LOG_CRITICAL(tag, expr) APP_LOG(Critical, tag, expr)

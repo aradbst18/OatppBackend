@@ -1,13 +1,13 @@
 # OatppBackend
 
 Modern C++17 backend foundation: Oat++ REST + WebSocket echo, JWT auth,
-validated DTOs, SQLite/SQLCipher, JSON/TOML/XML config, optional
-Swagger and gzip — with a clean layered architecture and 59+ tests.
+validated DTOs, SQLCipher-backed storage, JSON/TOML/XML config, optional
+Swagger and gzip — with a clean layered architecture and 90+ tests.
 
 ## Architecture overview
 
 ```text
-controllers -> services -> repositories -> IDatabase (SQLite/SQLCipher)
+controllers -> services -> repositories -> IDatabase (SQLCipher/libpq)
      |             |             |
    DTOs      JwtService    bound-params SQL only
      |             |
@@ -15,19 +15,22 @@ AuthInterceptor  validation + range-checked ObjectMapper
 ```
 
 Full detail: [`docs/architecture.md`](docs/architecture.md). New endpoints:
-[`docs/adding-api.md`](docs/adding-api.md). Rules for automation:
-[`docs/codex-guide.md`](docs/codex-guide.md).
+[`docs/guides/adding-api.md`](docs/guides/adding-api.md). Rules for AI agents:
+[`AGENTS.md`](AGENTS.md) and [`.agents/`](.agents/).
+
 
 ## Prerequisites
 
 - CMake >= 3.20, GCC/Clang with C++17, OpenSSL, ZLIB
-- Oat++ 1.3.0 modules: `oatpp`, `oatpp-sqlite`, `oatpp-websocket`,
+- Oat++ 1.3.0 modules: `oatpp`, `oatpp-websocket`, `oatpp-sqlite` (if
+  `APP_ENABLE_SQLCIPHER=ON`), `oatpp-postgresql` (if `APP_ENABLE_POSTGRESQL=ON`),
   `oatpp-swagger` (if `APP_ENABLE_SWAGGER=ON`), `oatpp-zlib` (if
   `APP_ENABLE_ZLIB=ON`)
 - `jwt-cpp` 0.7.2, `jsoncpp` 1.9.6, `pugixml` 1.15, `toml11` 4.4.0
-- SQLite3 (or SQLCipher dev for `SQLCIPHER` builds)
+- SQLCipher dev (the file database library; opens plaintext files too)
 
-All are discovered with `find_package` (see [`docs/cmake.md`](docs/cmake.md)).
+All are discovered at configure time — `find_package`, plus
+`pkg_check_modules` for SQLCipher (see [`docs/cmake.md`](docs/cmake.md)).
 
 ## Build instructions
 
@@ -37,17 +40,22 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-Options (`-D`): `APP_ENABLE_ZLIB` (ON), `APP_ENABLE_SWAGGER` (ON),
-`APP_ENABLE_JSON/TOML/XML/YAML_PARSER` (ON), `APP_BUILD_TESTS` (ON),
-`ENABLE_SANITIZERS` (ON; the build type selects the set),
+Options (`-D`): `APP_ENABLE_ZLIB` (OFF), `APP_ENABLE_SWAGGER` (OFF),
+`APP_BUILD_TESTS` (ON), `ENABLE_SANITIZERS` (OFF; the build type selects the set),
 `VERBOSE_BUILD_SUMMARY` (OFF),
-`APP_DATABASE_BACKEND` (`SQLITE`/`SQLCIPHER`), `APP_PASSWORD_HASH_ALGO` (`SHA256`/`SHA384`/`SHA512`),
+`APP_ENABLE_POSTGRESQL` (OFF), `APP_ENABLE_SQLCIPHER` (ON),
+`APP_USERS_DATABASE_TYPE` (`SQLCIPHER`/`POSTGRESQL`),
+`APP_ENCRYPTION_USER_DATABASE` (OFF),
+`APP_ENABLE_JSON_PARSER` (ON), `APP_ENABLE_TOML/XML/YAML_PARSER` (OFF),
+`APP_PASSWORD_HASH_ALGO` (`SHA256`/`SHA384`/`SHA512`),
 `APP_CONFIG_FORMAT` (`JSON`/`TOML`/`XML`/`YAML`),
 `APP_VERSION` (`0.0.1`), `APP_RELEASE_DATE` (empty = build date), `APP_VERSION_FILE_FORMAT` (`JSON`).
 Invalid values (including a format whose parser is off) fail at configure
 time. `CMakePresets.json` holds `base` (all of the above) plus one preset per
-build type — `debug`, `debug-tsan`, `debug-msan`, `relwithdebinfo`,
-`relwithdebinfo-tsan`, `release`, `minsizerel` — override anything per
+configuration — sanitizer-free `debug`/`relwithdebinfo`,
+instrumented `debug-asan-ubsan`/`debug-tsan`/`debug-msan` (Clang) and
+`relwithdebinfo-asan-ubsan`/`relwithdebinfo-tsan`/`relwithdebinfo-msan`
+(Clang), plus `release`/`minsizerel` — override anything per
 configure with `-D`
 (e.g. `cmake --preset debug -DAPP_CONFIG_FORMAT=YAML`); plus a Ninja
 `-ninja` overlay in `CMakeUserPresets.json`. The full backend x format x
@@ -61,13 +69,29 @@ Same `AppSettings` fields in every format; see [`docs/configuration.md`](docs/co
 and `configs/app.{json,toml,xml,yaml}` samples. The runtime file is always
 `configs/app.conf`, created from defaults when missing.
 
-## SQLite vs SQLCipher
+## SQLCipher (file database) vs PostgreSQL
 
-- `SQLITE` (default): plaintext `SqliteDatabase`, no key, no sqlcipher symbols
-  linked or compiled.
-- `SQLCIPHER`: `SqlcipherDatabase` applies `PRAGMA key` at open (never logged)
-  and verifies `PRAGMA cipher_version`; empty key is a hard error.
-  `SqlcipherDatabase.hpp` cannot even be included in SQLite builds.
+- `SQLCIPHER` (default): `SqlcipherDatabase` over the SQLCipher library, executed
+  by the `oatpp-sqlite` adapter (standard SQLite is never linked; the
+  connection provider applies the key via SQLCipher's `sqlite3_key()`).
+  Empty key means plaintext; with `APP_ENCRYPTION_USER_DATABASE=ON` the
+  `database.key` is applied to every connection (never logged) and validated
+  with a schema read, so a wrong key fails `open()`. A missing key is
+  completed from defaults like every other parameter; the key stays optional
+  (an explicitly empty key opens the file plaintext and logs a startup
+  warning). `SqlcipherDatabase.hpp` cannot even be included without
+  `APP_WITH_SQLCIPHER`.
+- `POSTGRESQL`: `PostgresqlDatabase` over the `oatpp-postgresql` adapter (libpq
+  underneath, see [`docs/postgresql.md`](docs/postgresql.md) and `docs/architecture.md` §5); connection from the
+  `database.path`/`port`/`name`/`user`/`key` settings (scram-sha-256).
+  Requires `APP_ENABLE_POSTGRESQL=ON`
+  (configure-time error otherwise). Whether the SQLCipher file library is
+  compiled alongside is governed separately by `APP_ENABLE_SQLCIPHER` (`OFF`
+  links no file code at all); see `docs/cmake.md`. PostgreSQL encryption
+  (beyond scram auth) is not implemented — see
+  [`docs/roadmap/postgresql_encryption.md`](docs/roadmap/postgresql_encryption.md); requesting it with `POSTGRESQL` is a
+  configure-time error.
+
 
 ## Swagger
 
@@ -80,7 +104,7 @@ See [`docs/swagger.md`](docs/swagger.md).
 
 When enabled the HTTP handler negotiates gzip/deflate via `oatpp-zlib`
 providers, plus a tested `gzipCompress/gzipDecompress` helper. When disabled
-nothing is compiled or linked.
+nothing is compiled or linked. See [`docs/zlib.md`](docs/zlib.md).
 
 ## Running the server
 
@@ -114,10 +138,10 @@ API, WebSocket echo, database incl. injection, lifecycle, features):
 
 ## Documentation links
 
-- [Architecture](docs/architecture.md) · [Adding an API](docs/adding-api.md) ·
-  [Controller](docs/adding-controller.md) · [DTO](docs/adding-dto.md) ·
-  [Service](docs/adding-service.md) · [Repository](docs/adding-repository.md)
-- [Authentication](docs/authentication.md) · [Configuration](docs/configuration.md) ·
-  [CMake](docs/cmake.md) · [WebSocket](docs/websocket.md) · [Swagger](docs/swagger.md)
-- [Testing](docs/testing.md) · [Coding standards](docs/coding-standards.md) ·
-  [Codex guide](docs/codex-guide.md) · [Examples](docs/examples.md)
+- [Architecture](docs/architecture.md) · [Guides](docs/guides/README.md)
+- [CMake](docs/cmake.md) · [Configuration](docs/configuration.md)
+- [Authentication](docs/authentication.md) · [SQLCipher](docs/sqlcipher.md) · [PostgreSQL](docs/postgresql.md) · [WebSocket](docs/websocket.md) · [Swagger](docs/swagger.md) · [Zlib](docs/zlib.md)
+- [Testing](docs/testing.md) · [Examples](docs/examples.md)
+- [Coding standards](docs/coding-standards.md)
+- [Agent Guidelines](AGENTS.md)
+- [Roadmap](docs/roadmap/README.md)

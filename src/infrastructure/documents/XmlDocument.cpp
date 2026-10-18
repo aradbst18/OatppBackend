@@ -132,7 +132,8 @@ void appendXmlValue(pugi::xml_node& parent, const char* name, const DocumentValu
                 {
                     if (!item.isString())
                     {
-                        throw errors::serialization::SerializationFailed("XML attribute '" + key + "' must be a String for " + source);
+                        throw errors::serialization::SerializationFailed("XML attribute '" + key +
+                                                                         "' must be a String for " + source);
                     }
 
                     element.append_attribute(key.substr(1).c_str()).set_value(item.asString().c_str());
@@ -177,7 +178,8 @@ DocumentValue parseXml(const std::string& text, const std::string& source)
         {
             if (root)
             {
-                throw errors::serialization::ParsingFailed("XML document must have exactly one root element in " + source);
+                throw errors::serialization::ParsingFailed("XML document must have exactly one root element in " +
+                                                           source);
             }
 
             root = child;

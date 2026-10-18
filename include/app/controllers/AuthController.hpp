@@ -29,15 +29,17 @@ namespace app::controllers
 class AuthController : public oatpp::web::server::api::ApiController
 {
 public:
-    AuthController(const std::shared_ptr<ObjectMapper>& objectMapper, std::shared_ptr<services::AuthService> authService,
-                   std::shared_ptr<auth::JwtService> jwtService);
+    AuthController(const std::shared_ptr<ObjectMapper>& objectMapper,
+                   std::shared_ptr<services::AuthService> authService, std::shared_ptr<auth::JwtService> jwtService);
 
 #if defined(APP_WITH_SWAGGER)
     ENDPOINT_INFO(login);
+    ENDPOINT_INFO(refresh);
     ENDPOINT_INFO(whoAmI);
 #endif  // APP_WITH_SWAGGER
 
     ENDPOINT("POST", "/auth/login", login, BODY_DTO(Object<dto::LoginRequestDto>, body));
+    ENDPOINT("POST", "/auth/refresh", refresh, BODY_DTO(Object<dto::RefreshRequestDto>, body));
     ENDPOINT("GET", "/auth/who-am-i", whoAmI, REQUEST(std::shared_ptr<IncomingRequest>, request));
 
 private:

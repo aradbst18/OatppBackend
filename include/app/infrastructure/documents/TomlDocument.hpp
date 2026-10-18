@@ -14,8 +14,11 @@ namespace app::infrastructure::documents
  * Strings. A document must be a table at the top level.
  */
 DocumentValue parseToml(const std::string& text, const std::string& source);
+
 std::string serializeToml(const DocumentValue& value);
+
 DocumentValue loadTomlFile(const std::string& path);
+
 void saveTomlFile(const std::string& path, const DocumentValue& value);
 
 }  // namespace app::infrastructure::documents

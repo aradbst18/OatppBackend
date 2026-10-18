@@ -7,7 +7,8 @@
 namespace app::controllers
 {
 
-AuthController::AuthController(const std::shared_ptr<ObjectMapper>& objectMapper, std::shared_ptr<services::AuthService> authService,
+AuthController::AuthController(const std::shared_ptr<ObjectMapper>& objectMapper,
+                               std::shared_ptr<services::AuthService> authService,
                                std::shared_ptr<auth::JwtService> jwtService)
     : ApiController(objectMapper), authService_(std::move(authService)), jwtService_(std::move(jwtService))
 {
@@ -85,7 +86,8 @@ Note the deliberate `422` vs `401` split: `422` means "fix the input shape", `40
     auto example = dto::LoginRequestDto::createShared();
     example->username = oatpp::String("admin");
     example->password = oatpp::String("Admin1234");
-    info->addConsumes<Object<dto::LoginRequestDto>>("application/json", "Login credentials.").addExample("Seeded admin login", example);
+    info->addConsumes<Object<dto::LoginRequestDto>>("application/json", "Login credentials.")
+        .addExample("Seeded admin login", example);
 
     auto ok = dto::LoginResponseDto::createShared();
     ok->accessToken = oatpp::String(
@@ -97,10 +99,11 @@ Note the deliberate `422` vs `401` split: `422` means "fix the input shape", `40
     ok->role = oatpp::String("admin");
     ok->expiresIn = 3600;
 
-    info->addResponse<Object<dto::LoginResponseDto>>(Status::CODE_200, "application/json",
-                                                     "Login succeeded. `access_token` is a signed JWT (HS256) valid for `expires_in` "
-                                                     "seconds; send it as `Authorization: Bearer <access_token>`. `token_type` is always "
-                                                     "`\"Bearer\"`.")
+    info->addResponse<Object<dto::LoginResponseDto>>(
+            Status::CODE_200, "application/json",
+            "Login succeeded. `access_token` is a signed JWT (HS256) valid for `expires_in` "
+            "seconds; send it as `Authorization: Bearer <access_token>`. `token_type` is always "
+            "`\"Bearer\"`.")
         .addExample("Successful login", ok);
 
     info->addResponse<String>(Status::CODE_400, "text/plain",
@@ -139,7 +142,7 @@ void AuthController::Z__ENDPOINT_ADD_INFO_whoAmI(const std::shared_ptr<oatpp::we
 
 ## How authentication flows
 
-1. `AuthInterceptor` runs before routing: it extracts the bearer token, verifies signature + issuer + expiry (30s clock skew allowed), and stashes `subject|role|issuer` in the request bundle. Failures throw `authentication::*` which `AppErrorHandler` maps to `401 text/plain`.
+1. `AuthInterceptor` runs before routing: it extracts the bearer token, verifies signature + issuer + expiry (30s clock skew allowed), and stashes verified claims (dto::AuthClaimsDto) in the request bundle. Failures throw `authentication::*` which `AppErrorHandler` maps to `401 text/plain`.
 2. This endpoint reads the bundle first. If the interceptor was bypassed (e.g. direct router use in tests) it **fails closed** by verifying the header itself — an absent or bad token still yields `401`.
 
 ## Calling it from Swagger UI
@@ -176,9 +179,10 @@ curl -s http://localhost:8080/auth/who-am-i \
     ok->message = oatpp::String("Hello, authenticated world");
     ok->username = oatpp::String("admin");
     ok->role = oatpp::String("admin");
-    info->addResponse<Object<dto::WhoAmIResponseDto>>(Status::CODE_200, "application/json",
-                                                      "Authenticated. `username`/`role` are the verified JWT subject and `role` claim; "
-                                                      "`message` is a static greeting proving the request passed auth.")
+    info->addResponse<Object<dto::WhoAmIResponseDto>>(
+            Status::CODE_200, "application/json",
+            "Authenticated. `username`/`role` are the verified JWT subject and `role` claim; "
+            "`message` is a static greeting proving the request passed auth.")
         .addExample("Authenticated caller", ok);
 
     info->addResponse<String>(Status::CODE_401, "text/plain",
@@ -187,10 +191,22 @@ curl -s http://localhost:8080/auth/who-am-i \
                               "`authentication::InvalidToken` (signature/issuer/empty-subject failure) or "
                               "`authentication::TokenExpired` (TTL 3600s, 30s leeway). Frontend should discard the "
                               "stored token and redirect to login.")
-        .addExample("Missing or malformed Authorization header", oatpp::String("Missing or malformed Authorization header"))
+        .addExample("Missing or malformed Authorization header",
+                    oatpp::String("Missing or malformed Authorization header"))
         .addExample("Invalid token", oatpp::String("Invalid token"))
         .addExample("Expired token", oatpp::String("Invalid or expired token"))
         .addExample("Empty bearer token", oatpp::String("Missing token"));
+}
+
+void AuthController::Z__ENDPOINT_ADD_INFO_refresh(const std::shared_ptr<oatpp::web::server::api::Endpoint::Info>& info)
+{
+    info->summary = "Refresh expired JWT access token";
+    info->description =
+        "Public endpoint to obtain a new access token and rotated refresh token using a valid refresh token.";
+    info->addConsumes<Object<dto::RefreshRequestDto>>("application/json");
+    info->addResponse<Object<dto::LoginResponseDto>>(Status::CODE_200, "application/json");
+    info->addResponse<String>(Status::CODE_400, "text/plain");
+    info->addResponse<String>(Status::CODE_401, "text/plain");
 }
 
 #endif  // APP_WITH_SWAGGER
@@ -206,35 +222,63 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::login(const oa
     }
 
     const services::LoginResult result = authService_->login(body->username->c_str(), body->password->c_str());
+
     auto out = dto::LoginResponseDto::createShared();
-    out->accessToken = oatpp::String(result.accessToken.c_str());
+    out->accessToken = oatpp::String(result.accessToken);
+    out->refreshToken = result.refreshToken.empty() ? nullptr : oatpp::String(result.refreshToken);
     out->tokenType = oatpp::String("Bearer");
-    out->username = oatpp::String(result.username.c_str());
-    out->role = oatpp::String(result.role.c_str());
+    out->username = oatpp::String(result.username);
+    out->role = oatpp::String(result.role);
     out->expiresIn = result.expiresInSeconds;
+
     return createDtoResponse(Status::CODE_200, out);
 }
 
-std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(const std::shared_ptr<IncomingRequest>& request)
+std::shared_ptr<AuthController::OutgoingResponse> AuthController::refresh(
+    const oatpp::Object<dto::RefreshRequestDto>& body)
+{
+    if (!body || !body->refreshToken || body->refreshToken->empty())
+    {
+        throw errors::request::Missing("refresh_token is required");
+    }
+
+    const services::LoginResult result = authService_->refresh(body->refreshToken->c_str());
+
+    auto out = dto::LoginResponseDto::createShared();
+    out->accessToken = oatpp::String(result.accessToken);
+    out->refreshToken = oatpp::String(result.refreshToken);
+    out->tokenType = oatpp::String("Bearer");
+    out->username = oatpp::String(result.username);
+    out->role = oatpp::String(result.role);
+    out->expiresIn = result.expiresInSeconds;
+
+    return createDtoResponse(Status::CODE_200, out);
+}
+
+std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(
+    const std::shared_ptr<IncomingRequest>& request)
 {
     try
     {
-        // Primary path: claims stashed by AuthInterceptor.
+        // Primary path: typed claims stashed by AuthInterceptor.
         std::string subject;
         std::string role;
-        const oatpp::String bundled = request->getBundleData<oatpp::String>(middlewares::kClaimsBundleKey);
+        std::string issuer;
 
-        if (bundled)
+        try
         {
-            const std::string text = bundled->c_str();
-            const auto first = text.find('|');
-            const auto second = text.find('|', first + 1);
-
-            if (first != std::string::npos && second != std::string::npos)
+            const auto bundled =
+                request->getBundleData<oatpp::Object<dto::AuthClaimsDto>>(middlewares::kClaimsBundleKey);
+            if (bundled && bundled->subject)
             {
-                subject = text.substr(0, first);
-                role = text.substr(first + 1, second - first - 1);
+                subject = *bundled->subject;
+                role = bundled->role ? *bundled->role : "";
+                issuer = bundled->issuer ? *bundled->issuer : "";
             }
+        }
+        catch (...)
+        {
+            // Interceptor was not registered or bundle key missing/mismatched.
         }
 
         // Fail-closed fallback: verify the header directly so the endpoint is
@@ -242,9 +286,9 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(const s
         auth::TokenClaims claims;
         if (!subject.empty())
         {
-            claims.subject = subject;
-            claims.role = role;
-            claims.issuer = jwtService_->issuer();
+            claims.subject = std::move(subject);
+            claims.role = std::move(role);
+            claims.issuer = issuer.empty() ? jwtService_->issuer() : std::move(issuer);
         }
         else
         {
@@ -254,10 +298,12 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(const s
         }
 
         const services::LoginResult result = authService_->whoAmI(claims);
+
         auto out = dto::WhoAmIResponseDto::createShared();
         out->message = oatpp::String("Hello, authenticated world");
-        out->username = oatpp::String(result.username.c_str());
-        out->role = oatpp::String(result.role.c_str());
+        out->username = oatpp::String(result.username);
+        out->role = oatpp::String(result.role);
+
         return createDtoResponse(Status::CODE_200, out);
     }
     catch (const errors::AppException&)

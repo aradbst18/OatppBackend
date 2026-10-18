@@ -16,11 +16,14 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/out",
                 "APP_ENABLE_ZLIB": true,
                 "APP_PASSWORD_HASH_ALGO": "SHA512",
+                "APP_ENABLE_POSTGRESQL": true,
+                "APP_ENABLE_SQLCIPHER": true,
+                "APP_USERS_DATABASE_TYPE": "SQLCIPHER",
+                "APP_ENCRYPTION_USER_DATABASE": true,
                 "APP_ENABLE_JSON_PARSER": true,
                 "APP_ENABLE_TOML_PARSER": true,
                 "APP_ENABLE_XML_PARSER": true,
                 "APP_ENABLE_YAML_PARSER": true,
-                "APP_DATABASE_BACKEND": "SQLCIPHER",
                 "APP_CONFIG_FORMAT": "TOML",
                 "APP_VERSION": "0.0.1",
                 "APP_RELEASE_DATE": "",
@@ -30,6 +33,17 @@
         },
         {
             "name": "debug",
+            "displayName": "Debug (no sanitizers)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": false
+            }
+        },
+        {
+            "name": "debug-asan-ubsan",
             "displayName": "Debug + ASan/UBSan (largest)",
             "inherits": "base",
             "cacheVariables": {
@@ -63,6 +77,17 @@
         },
         {
             "name": "relwithdebinfo",
+            "displayName": "RelWithDebInfo (no sanitizers)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "APP_BUILD_TESTS": true,
+                "APP_ENABLE_SWAGGER": true,
+                "ENABLE_SANITIZERS": false
+            }
+        },
+        {
+            "name": "relwithdebinfo-asan-ubsan",
             "displayName": "RelWithDebInfo + ASan/UBSan",
             "inherits": "base",
             "cacheVariables": {
@@ -125,6 +150,12 @@
             "jobs": 2
         },
         {
+            "name": "debug-asan-ubsan",
+            "displayName": "Build: Debug + ASan/UBSan",
+            "configurePreset": "debug-asan-ubsan",
+            "jobs": 2
+        },
+        {
             "name": "debug-tsan",
             "displayName": "Build: DebugTSan",
             "configurePreset": "debug-tsan",
@@ -140,6 +171,12 @@
             "name": "relwithdebinfo",
             "displayName": "Build: RelWithDebInfo",
             "configurePreset": "relwithdebinfo",
+            "jobs": 2
+        },
+        {
+            "name": "relwithdebinfo-asan-ubsan",
+            "displayName": "Build: RelWithDebInfo + ASan/UBSan",
+            "configurePreset": "relwithdebinfo-asan-ubsan",
             "jobs": 2
         },
         {
@@ -177,6 +214,14 @@
             }
         },
         {
+            "name": "debug-asan-ubsan",
+            "displayName": "Test: Debug + ASan/UBSan",
+            "configurePreset": "debug-asan-ubsan",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
             "name": "debug-tsan",
             "displayName": "Test: DebugTSan",
             "configurePreset": "debug-tsan",
@@ -196,6 +241,14 @@
             "name": "relwithdebinfo",
             "displayName": "Test: RelWithDebInfo",
             "configurePreset": "relwithdebinfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "relwithdebinfo-asan-ubsan",
+            "displayName": "Test: RelWithDebInfo + ASan/UBSan",
+            "configurePreset": "relwithdebinfo-asan-ubsan",
             "output": {
                 "outputOnFailure": true
             }
@@ -233,6 +286,24 @@
                 {
                     "type": "test",
                     "name": "debug"
+                }
+            ]
+        },
+        {
+            "name": "debug-asan-ubsan",
+            "displayName": "Configure, build, and test: Debug + ASan/UBSan",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "debug-asan-ubsan"
+                },
+                {
+                    "type": "build",
+                    "name": "debug-asan-ubsan"
+                },
+                {
+                    "type": "test",
+                    "name": "debug-asan-ubsan"
                 }
             ]
         },
@@ -287,6 +358,24 @@
                 {
                     "type": "test",
                     "name": "relwithdebinfo"
+                }
+            ]
+        },
+        {
+            "name": "relwithdebinfo-asan-ubsan",
+            "displayName": "Configure, build, and test: RelWithDebInfo + ASan/UBSan",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "relwithdebinfo-asan-ubsan"
+                },
+                {
+                    "type": "build",
+                    "name": "relwithdebinfo-asan-ubsan"
+                },
+                {
+                    "type": "test",
+                    "name": "relwithdebinfo-asan-ubsan"
                 }
             ]
         },

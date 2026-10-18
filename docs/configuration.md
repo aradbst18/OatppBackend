@@ -35,37 +35,109 @@ never linked. Selecting a format whose parser is disabled is a configure-time
 ```json
 {
   "server": {"host": "127.0.0.1", "port": 8080},
-  "database": {"path": "data/app.db", "key": "dev-sqlcipher-key-change-me"},
+  "database": {"path": "data/postgresql", "key": "oatpp_test_pw", "port": 5433, "name": "oatpp_backend",
+               "user": "oatpp_tester"},
   "jwt": {"secret": "change-me-in-production", "issuer": "oatpp-backend", "ttlSeconds": 3600},
-  "logging": {"level": "INFO", "filePath": "logs"},
+  "logging": {"level": "INFO", "path": "logs"},
   "swagger": {"resPath": "/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res"}
 }
 ```
 
-Leaf mapping: `host`/`port`, `database.path` (`databasePath`),
-`database.key` (`databaseKey`, SQLCipher only), `jwt.secret`/`issuer`/
-`ttlSeconds`, `logging.level`/`filePath`, `swagger.resPath`
+Leaf mapping: `host`/`port`, `database.path` (`databasePath`: file path
+for SQLCIPHER, e.g. `data/app.db`, or Unix socket dir for
+POSTGRESQL, e.g. `data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
+`database.key` (`databaseKey`: SQLCipher encryption key or PostgreSQL
+scram-sha-256 password, never logged), `database.port`/`name`/`user`
+(`databasePort`, …, PostgreSQL connection), `jwt.secret`/`issuer`/
+`ttlSeconds`, `logging.level`/`path` (the log directory; see below), `swagger.resPath`
 (`swaggerResPath`, Swagger UI assets dir; default is the oatpp-swagger
 library's own res dir via `OATPP_SWAGGER_RES_PATH`, only used when built with
 `APP_WITH_SWAGGER`). The `swagger` section is only written to generated
 `app.conf` files when built with Swagger enabled (it stays in the checked-in
 samples either way); a `swagger` section present while disabled is loaded but
 ignored. `validate()` returns `""` when valid, otherwise a
-message used in exceptions. Pre-grouping flat files
-(`host`, `databasePath`, … at the top level) are rejected with a migration
-error instead of silently loading defaults.
+message used in exceptions. A file that does not match the grouped schema
+fails to load with a descriptive error instead of silently loading defaults
+(delete `configs/app.conf` to regenerate it from defaults).
 
-`database.key` rule: SQLCipher builds require it explicitly present — a file
-without it fails to load (no silent fallback to the built-in default, which
-could leave a deployment accidentally unencrypted). SQLite builds ignore it
-when present and never write it.
+`database.key` rule: the SQLCipher key is optional — a missing key is
+completed from defaults like every other parameter (recorded in the
+completion log and written back), a present key of any string value is used
+as-is, and an explicitly empty key opens the file plaintext (startup logs a
+warning). A wrong key fails `open()` (validated with a schema read) — the
+operator's to fix. Builds without user-database encryption have no `key`
+concept at all (compiled out); POSTGRESQL always requires it (non-empty
+scram password).
+Per-type files: SQLCIPHER writes/reads only `path` (and `key` in encryption
+builds);
+POSTGRESQL only `path`/`key`/`port`/`name`/`user`. Existing files are left
+as-is (each backend reads only its own fields); missing files are created
+with only their backend's fields. For POSTGRESQL `path` (socket dir),
+`port` (non-zero), `name`/`user` (non-empty) and `key` (non-empty scram
+password) are validated. POSTGRESQL defaults match
+[`docs/postgresql.md`](postgresql.md) exactly (`data/postgresql`, `5433`,
+`oatpp_backend`, `oatpp_tester`, `oatpp_test_pw`).
+
+Build exclusion: `APP_USERS_DATABASE_TYPE` selects exactly one backend
+(`SQLCIPHER` or `POSTGRESQL`); `APP_ENABLE_SQLCIPHER` toggles file support and
+`APP_ENCRYPTION_USER_DATABASE` toggles user-database encryption
+(SQLCIPHER only). File builds compile the single SQLCipher-backed
+`SqlcipherDatabase` — the standard SQLite library is never searched, linked,
+or compiled in any configuration. No-file builds
+(`USERS=POSTGRESQL`, `ENABLE_SQLCIPHER=OFF`) compile only the PostgreSQL
+backend — no file symbols, no `SqlcipherDocument`.
+
+Startup order: 1) create `configs/app.conf` from per-type defaults when
+missing (skip when present); 2) load + validate it — failures in 1)-2) append
+one `HH:MM:SS.mmm [CRITICAL] [config] …` line to
+`<exe-dir>/logs/yyyy-mm-dd.log` (a `logs` directory is created next to the
+executable when needed; same daily format as the main log) and exit 1; 3) logging; 4) database (below); 5)
+REST/Oatpp components; 6) REST server; 7) serve.
+
+Startup provisioning: SQLCIPHER boots check `database.path`: a path
+elsewhere is treated as non-existent (a new database is created at the
+configured path); missing file is created on open, existing files are
+verified for schema + `admin` user (`AuthService::ensureSeeded`, which
+creates `admin`/`Admin1234` when absent). With user-database encryption on,
+the file is SQLCipher-encrypted via `database.key` (a missing key is
+completed from defaults; an explicitly empty key opens the file plaintext
+with a startup warning; a wrong key fails `open()` with
+`errors::database::ConnectionFailed`); with it off, the same SQLCipher-backed
+backend opens the file as plaintext.
+POSTGRESQL boots run `PostgresqlLocalServer::ensureProvisioned()` first (socket + TCP on
+127.0.0.1): missing cluster -> `initdb --auth=scram-sha-256` + `pg_ctl
+start` + role/db creation; stopped cluster -> start; running cluster ->
+ensure role/db exist and upgrade `trust` to `scram-sha-256` automatically.
+If our cluster is missing/stopped but TCP `127.0.0.1:<port>` already answers
+(a foreign server created elsewhere with the same port but a different
+path), startup fails with `Port <port> is already in use by another
+PostgreSQL server; cannot initialize/start database at '<pgdata>' there`
+and terminates; a server matching our path/port proceeds normally.
+
+## Settings completeness
+
+The application guarantees a complete configuration: a missing file is
+created from per-type defaults; an existing file with absent parameters
+keeps its values and gets the missing ones added from defaults — every
+parameter follows this rule with no exceptions, including `database.key`
+(a missing key is completed from defaults; a present key of any string
+value is left untouched — an explicitly empty key means plaintext — and an
+open failure from a wrong key is the operator's to fix). The completed names
+are logged (`group.leaf` list) and
+the file is rewritten. Wrong data types and invalid values are never
+auto-fixed — loading aborts with a critical error for the operator to
+correct.
+
+`logging.path` was renamed from `logging.filePath`: files still using the
+old name fail with a migration error (rename it or delete the file to
+regenerate).
 
 ## File logging
 
-`logFilePath` is a **directory**, not a file — just set the path:
+`logPath` is a **directory**, not a file — just set the path:
 
 ```json
-{ "logging": {"filePath": "logs"} }
+{ "logging": {"path": "logs"} }
 ```
 
 - The active file is `<dir>/yyyy-mm-dd.log` (local date), resolved on every
@@ -73,7 +145,7 @@ when present and never write it.
 - Every line starts with `HH:MM:SS.milliseconds`, then level, tag, message:
   `14:03:22.041 [INFO] [auth] Login succeeded for user 'admin'`.
   Console/stderr output uses the same line format.
-- Empty `logFilePath` (`""`) disables file logging (console only).
+- Empty `path` (`""`) disables file logging (console only).
 - The directory is created on demand; unwritable locations fall back to a
   stderr notice without crashing. `logs/` is git-ignored.
 
@@ -120,5 +192,11 @@ independent parser toggle with the same fail-fast rule):
   (`yyyy-mm-dd`); a provided value must already match that shape.
 - `startupTime`: local time of the write, `HH:MM:SS`.
 
-A write failure only logs a warning; startup continues. The file is
-runtime-generated, so it is git-ignored.
+The file is runtime-generated, so it is git-ignored.
+
+The same completeness contract as the main config applies: a missing file
+is created, absent fields (`version`, `releaseDate`, `startupTime`) are
+completed from the current build info, and wrong types or invalid values
+abort startup with a critical error for the operator to fix
+(`version` must be `x.y.z`, `releaseDate` `yyyy-mm-dd`, `startupTime`
+`HH:MM:SS`).

@@ -1,7 +1,11 @@
-#include "app/infrastructure/documents/DatabaseDocument.hpp"
+#include "app/infrastructure/documents/SqlcipherDocument.hpp"
+
+#ifndef APP_WITH_SQLCIPHER
+#error "SqlcipherDocument.cpp requires APP_WITH_SQLCIPHER (configure with -DAPP_ENABLE_SQLCIPHER=ON)"
+#endif  // !APP_WITH_SQLCIPHER
 
 #include "app/errors/AppException.hpp"
-#include "app/infrastructure/database/DatabaseFactory.hpp"
+#include "app/infrastructure/database/SqlcipherDatabase.hpp"
 
 namespace app::infrastructure::documents
 {
@@ -9,27 +13,15 @@ namespace app::infrastructure::documents
 namespace
 {
 
-std::shared_ptr<infrastructure::database::IDatabase> openBackend(const std::string& path, const std::string& key, const std::string& what)
+// File access bypasses DatabaseFactory on purpose: the factory serves the
+// single configured user database (APP_USERS_DATABASE_TYPE), while these
+// helpers open arbitrary file databases (plaintext or encrypted, via the
+// optional key) — including files whose encryption differs from the user
+// database itself.
+std::shared_ptr<infrastructure::database::IDatabase> openFile(const std::string& path, const std::string& key,
+                                                              const std::string& what)
 {
-#if defined(APP_DATABASE_SQLCIPHER) && defined(APP_DATABASE_SQLITE)
-#error "APP_DATABASE_SQLCIPHER and APP_DATABASE_SQLITE are mutually exclusive (configure with -DAPP_DATABASE_BACKEND=SQLITE|SQLCIPHER)"
-#elif defined(APP_DATABASE_SQLCIPHER)
-    if (key.empty())
-    {
-        throw errors::database::ConnectionFailed("Database " + what + " '" + path + "' requires a key in SQLCIPHER builds");
-    }
-
-    auto db = infrastructure::database::DatabaseFactory::create(path, key);
-#elif defined(APP_DATABASE_SQLITE)
-    if (!key.empty())
-    {
-        throw errors::config::Invalid("Database " + what + " '" + path + "' takes no key in SQLITE builds");
-    }
-
-    auto db = infrastructure::database::DatabaseFactory::create(path);
-#else
-#error "No database backend defined (require APP_DATABASE_SQLITE or APP_DATABASE_SQLCIPHER via -DAPP_DATABASE_BACKEND=SQLITE|SQLCIPHER)"
-#endif  // APP_DATABASE backend selection (SQLCIPHER / SQLITE)
+    auto db = std::make_shared<infrastructure::database::SqlcipherDatabase>(path, key);
 
     try
     {
@@ -136,20 +128,21 @@ DocumentValue dumpOpenTable(infrastructure::database::IDatabase& db, const std::
 
 }  // namespace
 
-std::shared_ptr<infrastructure::database::IDatabase> openDocumentDatabase(const std::string& path, const std::string& key)
+std::shared_ptr<infrastructure::database::IDatabase> openSqlcipherDatabase(const std::string& path,
+                                                                           const std::string& key)
 {
-    return openBackend(path, key, "document");
+    return openFile(path, key, "document");
 }
 
-std::vector<std::string> listDatabaseTables(const std::string& path, const std::string& key)
+std::vector<std::string> listSqlcipherTables(const std::string& path, const std::string& key)
 {
-    auto db = openBackend(path, key, "inspection");
+    auto db = openFile(path, key, "inspection");
     return tablesOf(*db);
 }
 
-std::string databaseTableSchema(const std::string& path, const std::string& table, const std::string& key)
+std::string sqlcipherTableSchema(const std::string& path, const std::string& table, const std::string& key)
 {
-    auto db = openBackend(path, key, "inspection");
+    auto db = openFile(path, key, "inspection");
     requireKnownTable(*db, table, path);
 
     const auto rows = db->execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", {table});
@@ -161,15 +154,15 @@ std::string databaseTableSchema(const std::string& path, const std::string& tabl
     return rows[0][0];
 }
 
-DocumentValue dumpDatabaseTable(const std::string& path, const std::string& table, const std::string& key)
+DocumentValue dumpSqlcipherTable(const std::string& path, const std::string& table, const std::string& key)
 {
-    auto db = openBackend(path, key, "dump");
+    auto db = openFile(path, key, "dump");
     return dumpOpenTable(*db, table, path);
 }
 
-DocumentValue dumpDatabase(const std::string& path, const std::string& key)
+DocumentValue dumpSqlcipherDatabase(const std::string& path, const std::string& key)
 {
-    auto db = openBackend(path, key, "dump");
+    auto db = openFile(path, key, "dump");
 
     DocumentValue::Map tables;
     for (const std::string& name : tablesOf(*db))

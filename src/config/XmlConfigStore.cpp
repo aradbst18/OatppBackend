@@ -15,7 +15,8 @@ namespace app::config
 namespace
 {
 
-std::string childText(const infrastructure::documents::DocumentValue& parent, const char* name, const std::string& fallback)
+std::string childText(const infrastructure::documents::DocumentValue& parent, const char* name,
+                      const std::string& fallback)
 {
     const infrastructure::documents::DocumentValue* node = parent.find(name);
     if (node == nullptr || node->isNull())
@@ -24,7 +25,7 @@ std::string childText(const infrastructure::documents::DocumentValue& parent, co
     }
 
     // A present-but-empty element parses as "" and round-trips values like
-    // filePath=""; only a missing element falls back.
+    // path=""; only a missing element falls back.
     return node->asString();
 }
 
@@ -32,24 +33,26 @@ std::string childText(const infrastructure::documents::DocumentValue& parent, co
 // loading defaults.
 void rejectLegacyFlat(const infrastructure::documents::DocumentValue& root, const std::string& source)
 {
-    for (const char* key : {"host", "port", "databasePath", "databaseKey", "jwtSecret", "jwtIssuer", "jwtTtlSeconds", "logLevel", "logFilePath"})
+    for (const char* key : {"host", "port", "databasePath", "databaseKey", "jwtSecret", "jwtIssuer", "jwtTtlSeconds",
+                            "logLevel", "logFilePath"})
     {
         if (root.contains(key))
         {
-            throw errors::config::Invalid(std::string("Unsupported flat element <") + key + "> in " + source + ": expected grouped schema " +
-                                          "(server/database/jwt/logging)");
+            throw errors::config::Invalid(std::string("Unsupported flat element <") + key + "> in " + source +
+                                          ": expected grouped schema " + "(server/database/jwt/logging)");
         }
     }
 }
 
-const infrastructure::documents::DocumentValue* findGroup(const infrastructure::documents::DocumentValue& root, const char* name)
+const infrastructure::documents::DocumentValue* findGroup(const infrastructure::documents::DocumentValue& root,
+                                                          const char* name)
 {
     return root.find(name);
 }
 
 }  // namespace
 
-AppSettings XmlConfigStore::load(const std::string& path)
+AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::string>* missing)
 {
     const infrastructure::documents::DocumentValue document = infrastructure::documents::loadXmlFile(path);
     const infrastructure::documents::DocumentValue* root = document.find("app");
@@ -63,108 +66,255 @@ AppSettings XmlConfigStore::load(const std::string& path)
         rejectLegacyFlat(*root, path);
         AppSettings s = AppSettings::defaults();
 
+        auto noteMissing = [missing](const char* group, const char* leaf)
+        {
+            if (missing != nullptr)
+            {
+                missing->push_back(std::string(group) + "." + leaf);
+            }
+        };
+
         if (const infrastructure::documents::DocumentValue* server = findGroup(*root, "server"))
         {
-            if (server->isMap())
+            if (!server->isMap())
             {
-                s.host = childText(*server, "host", s.host);
-                const std::string portText = childText(*server, "port", "");
+                throw errors::config::Invalid("Invalid <server> group in " + path);
+            }
 
-                if (!portText.empty())
+            if (!server->contains("host"))
+            {
+                noteMissing("server", "host");
+            }
+
+            s.host = childText(*server, "host", s.host);
+            if (!server->contains("port"))
+            {
+                noteMissing("server", "port");
+            }
+
+            const std::string portText = childText(*server, "port", "");
+
+            if (!portText.empty())
+            {
+                try
                 {
-                    try
+                    const int port = std::stoi(portText);
+                    if (port < 1 || port > 65535)
                     {
-                        const int port = std::stoi(portText);
-                        if (port < 1 || port > 65535)
-                        {
-                            throw errors::config::Invalid("port out of range in " + path);
-                        }
+                        throw errors::config::Invalid("port out of range in " + path);
+                    }
 
-                        s.port = static_cast<std::uint16_t>(port);
-                    }
-                    catch (const errors::config::Invalid&)
-                    {
-                        throw;
-                    }
-                    catch (...)
-                    {
-                        throw errors::config::Invalid("Invalid <port> in " + path);
-                    }
+                    s.port = static_cast<std::uint16_t>(port);
+                }
+                catch (const errors::config::Invalid&)
+                {
+                    throw;
+                }
+                catch (...)
+                {
+                    throw errors::config::Invalid("Invalid <port> in " + path);
                 }
             }
         }
 
         if (const infrastructure::documents::DocumentValue* database = findGroup(*root, "database"))
         {
-            if (database->isMap())
+            if (!database->isMap())
             {
-                s.databasePath = childText(*database, "path", s.databasePath);
+                throw errors::config::Invalid("Invalid <database> group in " + path);
+            }
 
-#ifdef APP_DATABASE_SQLCIPHER
-                // The key must be explicitly present: falling back to the built-in default
-                // would hide a misconfigured (unencrypted-by-accident) deployment.
-                if (database->contains("key"))
+            if (database->contains("host"))
+            {
+                throw errors::config::Invalid("database.host was renamed to database.path in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (database->contains("password"))
+            {
+                throw errors::config::Invalid("database.password was renamed to database.key in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (!database->contains("path"))
+            {
+                noteMissing("database", "path");
+            }
+
+            s.databasePath = childText(*database, "path", s.databasePath);
+#ifdef APP_DATABASE_POSTGRESQL
+            const std::string dbPortText = childText(*database, "port", "");
+
+            if (!dbPortText.empty())
+            {
+                try
                 {
-                    s.databaseKey = childText(*database, "key", "");
+                    const int portValue = std::stoi(dbPortText);
+                    if (portValue < 1 || portValue > 65535)
+                    {
+                        throw errors::config::Invalid("database.port out of range in " + path);
+                    }
+
+                    s.databasePort = static_cast<std::uint16_t>(portValue);
                 }
-                else
+                catch (const errors::config::Invalid&)
                 {
-                    throw errors::config::Invalid("database.key is required for the SQLCIPHER backend in " + path);
+                    throw;
                 }
-#endif  // APP_DATABASE_SQLCIPHER
+                catch (...)
+                {
+                    throw errors::config::Invalid("Invalid <port> in <database> in " + path);
+                }
+            }
+
+            if (!database->contains("port"))
+            {
+                noteMissing("database", "port");
+            }
+
+            if (!database->contains("name"))
+            {
+                noteMissing("database", "name");
+            }
+
+            s.databaseName = childText(*database, "name", s.databaseName);
+            if (!database->contains("user"))
+            {
+                noteMissing("database", "user");
+            }
+
+            s.databaseUser = childText(*database, "user", s.databaseUser);
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+            // Absent key falls back to the built-in default like any other
+            // missing parameter; a present-but-wrongly-typed key throws below.
+            // If the default key cannot open the database, that connection
+            // failure is the operator's to fix.
+            if (database->contains("key"))
+            {
+                s.databaseKey = childText(*database, "key", "");
             }
             else
             {
-#ifdef APP_DATABASE_SQLCIPHER
-                throw errors::config::Invalid("database.key is required for the SQLCIPHER backend in " + path);
-#endif  // APP_DATABASE_SQLCIPHER
+                noteMissing("database", "key");
             }
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
         else
         {
-#ifdef APP_DATABASE_SQLCIPHER
-            throw errors::config::Invalid("database.key is required for the SQLCIPHER backend in " + path);
-#endif  // APP_DATABASE_SQLCIPHER
+            noteMissing("database", "path");
+
+#ifdef APP_DATABASE_POSTGRESQL
+            noteMissing("database", "port");
+            noteMissing("database", "name");
+            noteMissing("database", "user");
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+            noteMissing("database", "key");
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
 
         if (const infrastructure::documents::DocumentValue* jwt = findGroup(*root, "jwt"))
         {
-            if (jwt->isMap())
+            if (!jwt->isMap())
             {
-                s.jwtSecret = childText(*jwt, "secret", s.jwtSecret);
-                s.jwtIssuer = childText(*jwt, "issuer", s.jwtIssuer);
-                const std::string ttlText = childText(*jwt, "ttlSeconds", "");
+                throw errors::config::Invalid("Invalid <jwt> group in " + path);
+            }
 
-                if (!ttlText.empty())
+            if (!jwt->contains("secret"))
+            {
+                noteMissing("jwt", "secret");
+            }
+
+            s.jwtSecret = childText(*jwt, "secret", s.jwtSecret);
+            if (!jwt->contains("issuer"))
+            {
+                noteMissing("jwt", "issuer");
+            }
+
+            s.jwtIssuer = childText(*jwt, "issuer", s.jwtIssuer);
+            if (!jwt->contains("ttlSeconds"))
+            {
+                noteMissing("jwt", "ttlSeconds");
+            }
+
+            const std::string ttlText = childText(*jwt, "ttlSeconds", "");
+
+            if (!ttlText.empty())
+            {
+                try
                 {
-                    try
-                    {
-                        s.jwtTtlSeconds = std::stoll(ttlText);
-                    }
-                    catch (...)
-                    {
-                        throw errors::config::Invalid("Invalid <ttlSeconds> in " + path);
-                    }
+                    s.jwtTtlSeconds = std::stoll(ttlText);
+                }
+                catch (...)
+                {
+                    throw errors::config::Invalid("Invalid <ttlSeconds> in " + path);
                 }
             }
+        }
+        else
+        {
+            noteMissing("jwt", "secret");
+            noteMissing("jwt", "issuer");
+            noteMissing("jwt", "ttlSeconds");
         }
 
         if (const infrastructure::documents::DocumentValue* logging = findGroup(*root, "logging"))
         {
-            if (logging->isMap())
+            if (!logging->isMap())
             {
-                s.logLevel = childText(*logging, "level", s.logLevel);
-                s.logFilePath = childText(*logging, "filePath", s.logFilePath);
+                throw errors::config::Invalid("Invalid <logging> group in " + path);
             }
+
+            if (logging->contains("filePath"))
+            {
+                throw errors::config::Invalid("logging.filePath was renamed to logging.path in " + path +
+                                              ": delete the file to regenerate or rename manually");
+            }
+
+            if (!logging->contains("level"))
+            {
+                noteMissing("logging", "level");
+            }
+
+            s.logLevel = childText(*logging, "level", s.logLevel);
+            if (!logging->contains("path"))
+            {
+                noteMissing("logging", "path");
+            }
+
+            s.logPath = childText(*logging, "path", s.logPath);
+        }
+        else
+        {
+            noteMissing("logging", "level");
+            noteMissing("logging", "path");
         }
 
         if (const infrastructure::documents::DocumentValue* swagger = findGroup(*root, "swagger"))
         {
-            if (swagger->isMap())
+            if (!swagger->isMap())
             {
-                s.swaggerResPath = childText(*swagger, "resPath", s.swaggerResPath);
+                throw errors::config::Invalid("Invalid <swagger> group in " + path);
             }
+
+            s.swaggerResPath = childText(*swagger, "resPath", s.swaggerResPath);
+
+#ifdef APP_WITH_SWAGGER
+            if (!swagger->contains("resPath"))
+            {
+                noteMissing("swagger", "resPath");
+            }
+#endif  // APP_WITH_SWAGGER
         }
+#ifdef APP_WITH_SWAGGER
+        else
+        {
+            noteMissing("swagger", "resPath");
+        }
+#endif  // APP_WITH_SWAGGER
 
         s.configSource = path;
 
@@ -201,9 +351,15 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings)
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();
     database["path"] = settings.databasePath;
 
-#ifdef APP_DATABASE_SQLCIPHER
+#ifdef APP_DATABASE_POSTGRESQL
+    database["port"] = std::to_string(settings.databasePort);
+    database["name"] = settings.databaseName;
+    database["user"] = settings.databaseUser;
+#endif  // APP_DATABASE_POSTGRESQL
+
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
     database["key"] = settings.databaseKey;
-#endif  // APP_DATABASE_SQLCIPHER
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
 
     infrastructure::documents::DocumentValue jwt = infrastructure::documents::DocumentValue::makeMap();
     jwt["secret"] = settings.jwtSecret;
@@ -212,7 +368,7 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings)
 
     infrastructure::documents::DocumentValue logging = infrastructure::documents::DocumentValue::makeMap();
     logging["level"] = settings.logLevel;
-    logging["filePath"] = settings.logFilePath;
+    logging["path"] = settings.logPath;
 
     infrastructure::documents::DocumentValue inner = infrastructure::documents::DocumentValue::makeMap();
     inner["server"] = std::move(server);

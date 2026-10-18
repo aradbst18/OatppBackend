@@ -48,7 +48,7 @@ bool isIntegerLiteral(const std::string& text)
 
 DocumentValue scalarFromString(const std::string& text)
 {
-    // NOTE: "" stays a String (explicit empty, e.g. filePath=""). Only the
+    // NOTE: "" stays a String (explicit empty, e.g. path=""). Only the
     // named null literals become Null; a missing key is already Null before
     // reaching here (IsNull check in fromYamlNode).
     if (text == "null" || text == "Null" || text == "NULL" || text == "~")
@@ -164,6 +164,7 @@ void emitYamlValue(YAML::Emitter& out, const DocumentValue& value, const std::st
             out << value.asString();
             return;
         case DocumentValue::Type::List:
+        {
             out << YAML::BeginSeq;
             for (const DocumentValue& item : value.asList())
             {
@@ -172,7 +173,9 @@ void emitYamlValue(YAML::Emitter& out, const DocumentValue& value, const std::st
 
             out << YAML::EndSeq;
             return;
+        }
         case DocumentValue::Type::Map:
+        {
             out << YAML::BeginMap;
             for (const auto& [key, item] : value.asMap())
             {
@@ -182,6 +185,7 @@ void emitYamlValue(YAML::Emitter& out, const DocumentValue& value, const std::st
 
             out << YAML::EndMap;
             return;
+        }
     }
 
     throw errors::serialization::SerializationFailed("Unsupported DocumentValue node for YAML in " + source);
@@ -217,7 +221,8 @@ std::string serializeYaml(const DocumentValue& value)
         emitYamlValue(out, value, "<value>");
         if (!out.good())
         {
-            throw errors::serialization::SerializationFailed(std::string("Failed to encode YAML: ") + out.GetLastError());
+            throw errors::serialization::SerializationFailed(std::string("Failed to encode YAML: ") +
+                                                             out.GetLastError());
         }
 
         return std::string(out.c_str());

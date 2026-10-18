@@ -54,6 +54,11 @@ void LoginResponseDto::Z__PROPERTY_ADD_INFO_accessToken(oatpp::data::mapping::ty
     info->description = "JWT access token to send as `Authorization: Bearer <token>`.";
 }
 
+void LoginResponseDto::Z__PROPERTY_ADD_INFO_refreshToken(oatpp::data::mapping::type::BaseObject::Property::Info* info)
+{
+    info->description = "Opaque refresh token used to obtain a new access token.";
+}
+
 void LoginResponseDto::Z__PROPERTY_ADD_INFO_tokenType(oatpp::data::mapping::type::BaseObject::Property::Info* info)
 {
     info->description = "Token type, always `Bearer`.";
@@ -72,6 +77,12 @@ void LoginResponseDto::Z__PROPERTY_ADD_INFO_role(oatpp::data::mapping::type::Bas
 void LoginResponseDto::Z__PROPERTY_ADD_INFO_expiresIn(oatpp::data::mapping::type::BaseObject::Property::Info* info)
 {
     info->description = "Lifetime of the access token in seconds.";
+}
+
+void RefreshRequestDto::Z__PROPERTY_ADD_INFO_refreshToken(oatpp::data::mapping::type::BaseObject::Property::Info* info)
+{
+    info->required = true;
+    info->description = "Opaque refresh token previously returned by login or refresh.";
 }
 
 void WhoAmIResponseDto::Z__PROPERTY_ADD_INFO_message(oatpp::data::mapping::type::BaseObject::Property::Info* info)

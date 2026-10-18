@@ -52,7 +52,8 @@ std::shared_ptr<AppErrorHandler> AppErrorHandler::createShared()
     return std::make_shared<AppErrorHandler>();
 }
 
-std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::handleError(const std::exception_ptr& exceptionPtr)
+std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::handleError(
+    const std::exception_ptr& exceptionPtr)
 {
     try
     {
@@ -86,10 +87,11 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             }
 
-            const bool isParseFailure = http == 400 || lower.find("pars") != std::string::npos || lower.find("deserial") != std::string::npos ||
-                                        lower.find("out of range") != std::string::npos || lower.find("invalid") != std::string::npos ||
-                                        lower.find("body") != std::string::npos || lower.find("range") != std::string::npos ||
-                                        lower.find("dto") != std::string::npos;
+            const bool isParseFailure =
+                http == 400 || lower.find("pars") != std::string::npos || lower.find("deserial") != std::string::npos ||
+                lower.find("out of range") != std::string::npos || lower.find("invalid") != std::string::npos ||
+                lower.find("body") != std::string::npos || lower.find("range") != std::string::npos ||
+                lower.find("dto") != std::string::npos;
 
             if (http >= 500 && isParseFailure)
             {
@@ -134,11 +136,12 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
     }
 }
 
-std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::handleError(const oatpp::web::protocol::http::Status& status,
-                                                                                             const oatpp::String& message,
-                                                                                             const oatpp::web::protocol::http::Headers& headers)
+std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::handleError(
+    const oatpp::web::protocol::http::Status& status, const oatpp::String& message,
+    const oatpp::web::protocol::http::Headers& headers)
 {
     (void)headers;
+
     // Errors raised by oatpp itself (deserialization, validation, 404s).
     std::string text = message ? message->c_str() : (status.description != nullptr ? status.description : "Error");
     int http = status.code;
@@ -162,9 +165,10 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
 
-        const bool isParseFailure = lower.find("pars") != std::string::npos || lower.find("deserial") != std::string::npos ||
-                                    lower.find("out of range") != std::string::npos || lower.find("invalid") != std::string::npos ||
-                                    lower.find("body") != std::string::npos;
+        const bool isParseFailure =
+            lower.find("pars") != std::string::npos || lower.find("deserial") != std::string::npos ||
+            lower.find("out of range") != std::string::npos || lower.find("invalid") != std::string::npos ||
+            lower.find("body") != std::string::npos;
 
         if (isParseFailure)
         {
@@ -177,6 +181,7 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
     }
 
     logging::logWarn("error", std::string("HTTP ") + std::to_string(http) + ": " + text);
+
     auto response = createErrorResponse(oatpp::web::protocol::http::Status(http, ""), text);
     for (const auto& header : headers.getAll())
     {
@@ -186,16 +191,17 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
     return response;
 }
 
-std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::createErrorResponse(const oatpp::web::protocol::http::Status& status,
-                                                                                                     const std::string& message)
+std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::createErrorResponse(
+    const oatpp::web::protocol::http::Status& status, const std::string& message)
 {
     return createTextError(status, message);
 }
 
-std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createTextError(const oatpp::web::protocol::http::Status& status,
-                                                                                const std::string& message)
+std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createTextError(
+    const oatpp::web::protocol::http::Status& status, const std::string& message)
 {
-    auto response = oatpp::web::protocol::http::outgoing::ResponseFactory::createResponse(status, message.empty() ? status.description : message);
+    auto response = oatpp::web::protocol::http::outgoing::ResponseFactory::createResponse(
+        status, message.empty() ? status.description : message);
     response->putOrReplaceHeader(oatpp::web::protocol::http::Header::CONTENT_TYPE, "text/plain");
     return response;
 }

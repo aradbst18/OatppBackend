@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Application version as a cache variable so -DAPP_VERSION=x.y.z overrides it. Declared before project() so PROJECT_VERSION follows it. Validated in
-# cmake/options.cmake (must be numeric major.minor.patch).
+# Application version as a cache variable so -DAPP_VERSION=x.y.z overrides it. Declared before project() so
+# PROJECT_VERSION follows it. Validated in cmake/options.cmake (must be numeric major.minor.patch).
 set(APP_VERSION
     "0.0.1"
     CACHE STRING "Application version (major.minor.patch)")
@@ -38,30 +38,47 @@ add_library(
     src/domain/UserRole.cpp
     src/infrastructure/TextFile.cpp
     src/infrastructure/documents/DocumentValue.cpp
-    src/infrastructure/documents/DatabaseDocument.cpp
     src/config/AppSettings.cpp
     src/config/VersionFile.cpp
     src/config/ConfigFactory.cpp
-    src/infrastructure/database/SqliteDatabase.cpp
     src/infrastructure/database/DatabaseFactory.cpp
+    src/infrastructure/database/DatabaseExecutor.cpp
+    src/infrastructure/database/OrmSupport.cpp
+    src/repositories/BaseRepository.cpp
     src/repositories/UserRepository.cpp
+    src/repositories/RefreshTokenRepository.cpp
     src/auth/JwtService.cpp
     src/auth/PasswordHash.cpp
     src/services/AuthService.cpp
     src/controllers/AuthController.cpp
     src/controllers/EchoController.cpp
     src/middlewares/AuthInterceptor.cpp
+    src/middlewares/CorsInterceptor.cpp
+    src/middlewares/RateLimitInterceptor.cpp
     src/websocket/EchoListener.cpp
     src/application/TerminateHandler.cpp
     src/application/ManagedThread.cpp
     src/application/Application.cpp)
 
-if(APP_DATABASE_BACKEND STREQUAL "SQLITE")
-    # Plaintext SQLite backend: no extra sources beyond SqliteDatabase.cpp.
-elseif(APP_DATABASE_BACKEND STREQUAL "SQLCIPHER")
+# File database support: always SQLCipher-backed (SqlcipherDatabase over the oatpp-sqlite executor, optional key).
+# Disabled builds compile and link no SQLCipher.
+if(APP_ENABLE_SQLCIPHER)
     target_sources(app_core PRIVATE src/infrastructure/database/SqlcipherDatabase.cpp)
-else()
-    message(FATAL_ERROR "APP_DATABASE_BACKEND must be SQLITE or SQLCIPHER (got '${APP_DATABASE_BACKEND}')")
+endif()
+
+# File-database inspector: only meaningful with file database support compiled in.
+if(APP_ENABLE_SQLCIPHER)
+    target_sources(app_core PRIVATE src/infrastructure/documents/SqlcipherDocument.cpp)
+endif()
+
+# PostgreSQL support: oatpp-postgresql-backed database (libpq underneath) plus the server inspector. Disabled builds
+# compile and link no libpq.
+if(APP_ENABLE_POSTGRESQL)
+    target_sources(
+        app_core
+        PRIVATE src/infrastructure/database/PostgresqlDatabase.cpp
+                src/infrastructure/database/PostgresqlLocalServer.cpp
+                src/infrastructure/documents/PostgresqlDocument.cpp)
 endif()
 
 if(APP_ENABLE_ZLIB)
@@ -89,7 +106,8 @@ if(APP_ENABLE_SWAGGER)
     target_sources(app_core PRIVATE src/infrastructure/Swagger.cpp src/dto/AuthDtos.cpp)
 endif()
 
-target_include_directories(app_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
+target_include_directories(app_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                                           $<INSTALL_INTERFACE:include>)
 
 apply_app_definitions(app_core)
 apply_app_warnings(app_core)

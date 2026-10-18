@@ -10,9 +10,9 @@ namespace app::auth
 JwtService::JwtService(std::string secret, std::string issuer, std::chrono::seconds ttl)
     : secret_(std::move(secret)), issuer_(std::move(issuer)), ttl_(ttl)
 {
-    if (secret_.size() < 8)
+    if (secret_.size() < 32)
     {
-        throw errors::config::Invalid("JWT secret must be at least 8 characters");
+        throw errors::config::Invalid("JWT secret must be at least 32 characters");
     }
 
     if (issuer_.empty())
@@ -64,7 +64,8 @@ TokenClaims JwtService::verify(const std::string& token) const
     try
     {
         const auto decoded = jwt::decode(token);
-        const auto verifier = jwt::verify().allow_algorithm(jwt::algorithm::hs256{secret_}).with_issuer(issuer_).leeway(30UL);
+        const auto verifier =
+            jwt::verify().allow_algorithm(jwt::algorithm::hs256{secret_}).with_issuer(issuer_).leeway(30UL);
         verifier.verify(decoded);
 
         TokenClaims claims;
