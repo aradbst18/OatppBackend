@@ -33,8 +33,8 @@ if(APP_ENABLE_SWAGGER)
 endif()
 
 # File database support is always SQLCipher-backed: the SQLCipher library is the only file-database library searched or
-# linked (it opens both plaintext and encrypted files; see docs/roadmap/postgresql_encryption.md for the PostgreSQL side). The
-# standard SQLite library is never searched.
+# linked (it opens both plaintext and encrypted files; see docs/roadmap/postgresql_encryption.md for the PostgreSQL
+# side). The standard SQLite library is never searched.
 
 if(APP_ENABLE_SQLCIPHER)
     find_package(PkgConfig REQUIRED)

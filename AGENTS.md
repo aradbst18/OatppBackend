@@ -95,18 +95,30 @@ Strict one-way dependency pipeline:
 `Controller` ➔ `Service` ➔ `Repository` ➔ `DatabaseExecutor` / `IDatabase`
 
 1. **Controllers (`include/app/controllers/`, `src/controllers/`):**
-   - Wire format DTOs in/out only. Null-check incoming DTO bodies immediately.
+   - Wire format DTOs in/out only. Null-check incoming DTO bodies immediately, then call `dto->validate()`.
+   - Never write inline validation logic (e.g., regex loops, field length checks) inside endpoint handlers.
    - Call exactly one service method, map results via `createDtoResponse`.
    - Never contain SQL, crypto, or direct filesystem access.
-2. **Services (`include/app/services/`, `src/services/`):**
+2. **DTO Self-Validation Pattern (`include/app/dto/`, `src/dto/`):**
+   - Request DTOs declare `void validate() const` in headers and define them in `src/dto/`.
+   - Throws `app::errors::request::Missing` if any mandatory field is null or empty.
+   - Throws `app::errors::validation::InvalidValue` if format, charset, or policy constraints fail.
+   - For partial update DTOs (`Patch*Dto`), validate that at least one update field is provided.
+3. **REST Verb Semantics (PUT vs PATCH):**
+   - `PUT /resource/{id}`: Full resource replacement. The path parameter specifies the current identifier; the request body contains all required fields and may specify a new identifier for renaming.
+   - `PATCH /resource/{id}`: Partial update. The path parameter specifies the current identifier; the request body contains optional fields. At least one field must be supplied; empty bodies are rejected with HTTP 400.
+4. **Protected Entity Immutability:**
+   - Seeded/system accounts (such as the default `admin` account) must have immutability guardrails.
+   - Attempting to delete a protected entity via `DELETE` or rename it via `PUT`/`PATCH` must be rejected with `403 Forbidden` (`app::errors::authorization::ResourceAccessDenied`).
+5. **Services (`include/app/services/`, `src/services/`):**
    - Pure C++ business logic. Take and return plain C++ primitives or domain structs.
    - No Oat++ headers (`oatpp::String`, `oatpp::Object`) in service headers.
    - Throw fine-grained `app::errors::AppException` derivatives only. No HTTP status codes in services.
-3. **Repositories (`include/app/repositories/`, `src/repositories/`):**
+6. **Repositories (`include/app/repositories/`, `src/repositories/`):**
    - Subclass `BaseRepository`. Own entity SQL using `QUERY` templates and `PARAM` macros.
    - Idempotent `ensureSchema()` creating tables with `CREATE TABLE IF NOT EXISTS`.
    - Program against `IDatabase`; contain zero `#ifdef` backend branches.
-4. **No `OATPP_COMPONENT`:**
+7. **No `OATPP_COMPONENT`:**
    - Global component registries and service locators are strictly forbidden.
    - Constructor-inject all dependencies via `std::shared_ptr<T>`.
    - The only permitted singleton in the application is `app::logging::Logger::instance()`.
@@ -138,6 +150,8 @@ Strict one-way dependency pipeline:
    - Avoid engine-specific extensions (`AUTOINCREMENT`, `WITHOUT ROWID`, `x::text`).
 3. **Schema Migrations:**
    - Schema creation must be idempotent: `ensureSchema()` can be called repeatedly without failure.
+4. **SQLite Connection Scoping:**
+   - When executing multiple queries within a single operation (e.g. counting before deleting), always scope read statement results in an inner `{ ... }` block so SQLite frees the connection before the subsequent query executes.
 
 ---
 
@@ -164,15 +178,28 @@ Whenever a field is added to `app::config::AppSettings`:
 
 ---
 
-## 10. Formatter & Verification Gates
+## 10. Autonomous Self-Verification & Double-Checking Protocol
 
-Before completing any turn:
-1. Run clang-format on all modified files:
-   ```bash
-   /home/arad/.local/bin/clang-format -i <modified_files>
-   ```
-2. Build and run the entire CTest suite:
-   ```bash
-   ctest --test-dir build/debug --output-on-failure
-   ```
-3. Ensure all 14 test suites pass with 100% success rate.
+Agents must perform an exhaustive, multi-point verification before concluding any task. Never stop after writing code without executing the full protocol:
+
+1. **Pre-Flight Test Harness Verification:**
+   - Inspect `tests/support/TestRunner.hpp` before writing unit tests.
+   - Use only supported macros: `TEST_CASE`, `EXPECT_TRUE`, `EXPECT_FALSE`, `EXPECT_EQ`, `EXPECT_THROW_AS`.
+   - Never assume GoogleTest/Catch2 macros exist (e.g., `EXPECT_NO_THROW` is not defined; invoke the method directly and assert expected side-effects).
+2. **Domain Rule Cross-Referencing:**
+   - Cross-reference test payloads with the actual domain validation functions (`isValidUsername`, `isValidPassword`) before testing. Ensure test data adheres to exact character whitelists and lengths.
+3. **Build System Registration:**
+   - Verify that any newly created `.cpp` files are added to `CMakeLists.txt` under the appropriate library target (`app_core`, `app_main`, etc.).
+4. **Clang-Format Gate:**
+   - Run clang-format on all modified and new files:
+     ```bash
+     /home/arad/.local/bin/clang-format -i <modified_files>
+     ```
+5. **Full CTest Suite Execution:**
+   - Build and run the entire CTest suite:
+     ```bash
+     ctest --test-dir build/debug-ninja --output-on-failure
+     ```
+   - Ensure all 14 test suites pass with a 100% success rate.
+6. **Workspace Cleanliness Audit:**
+   - Inspect `git status` and `git diff` to verify that no stray debug lines, unintended modifications, or untracked temporary files were left behind.

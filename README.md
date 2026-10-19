@@ -1,17 +1,15 @@
 # OatppBackend
 
-Modern C++17 backend foundation: Oat++ REST + WebSocket echo, JWT auth,
-validated DTOs, SQLCipher-backed storage, JSON/TOML/XML config, optional
-Swagger and gzip — with a clean layered architecture and 90+ tests.
+Modern C++17 backend foundation: Oat++ REST APIs (JWT Authentication, User CRUD & batch management with role & admin protection), WebSocket echo, self-validating DTOs, dual SQLite/SQLCipher & PostgreSQL storage, JSON/TOML/XML/YAML config, Swagger OpenAPI 3.0, and gzip — with a clean layered architecture and 120+ tests.
 
 ## Architecture overview
 
 ```text
 controllers -> services -> repositories -> IDatabase (SQLCipher/libpq)
      |             |             |
-   DTOs      JwtService    bound-params SQL only
+   DTOs      JwtService    bound-params ANSI SQL only
      |             |
-AuthInterceptor  validation + range-checked ObjectMapper
+AuthInterceptor  dto->validate() + range-checked ObjectMapper
 ```
 
 Full detail: [`docs/architecture.md`](docs/architecture.md). New endpoints:

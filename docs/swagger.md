@@ -21,11 +21,11 @@ Resolution order at startup: configured path when it exists,
 
 ## How it is wired
 
-`Application::initRouting()` merges `authController->getEndpoints()` +
-`echoController->getEndpoints()` into one `Endpoints` and calls
+`Application::initRouting()` merges endpoints from `authController`, `userController`, and
+`echoController` into one `Endpoints` collection and calls
 `infrastructure::registerSwaggerWithEndpoints`, which builds `DocumentInfo`
 (title `OatppBackend API`, bearer scheme `bearer_auth`), generates the
-document with `oatpp::swagger::Generator`, and mounts
+OpenAPI 3.0 document with `oatpp::swagger::Generator`, and mounts
 `oatpp::swagger::Controller` directly (no global oatpp components).
 
 ## Documenting an endpoint correctly (header declares, .cpp documents)
@@ -34,31 +34,41 @@ Headers declare only; bodies live in the `.cpp` guarded by `APP_WITH_SWAGGER`,
 so swagger text is completely absent when the flag is off:
 
 ```cpp
-// include/app/controllers/AuthController.hpp
+// include/app/controllers/UserController.hpp
 #if defined(APP_WITH_SWAGGER)
-  ENDPOINT_INFO(whoAmI);
+  ENDPOINT_INFO(updateUser);
 #endif
-ENDPOINT("GET", "/auth/who-am-i", whoAmI, REQUEST(...));
+ENDPOINT("PUT", "/users/{username}", updateUser, PATH(String, username), BODY_DTO(Object<dto::UpdateUserDto>, dto));
 ```
 
 ```cpp
-// src/controllers/AuthController.cpp
+// src/controllers/UserController.cpp
 #if defined(APP_WITH_SWAGGER)
-void AuthController::Z__ENDPOINT_ADD_INFO_whoAmI(
+void UserController::Z__ENDPOINT_ADD_INFO_updateUser(
     const std::shared_ptr<oatpp::web::server::api::Endpoint::Info>& info) {
-  info->summary = "...";
-  info->description = "...";           // validation rules + auth scheme
-  info->addTag("auth");
+  info->summary = "Replace entire user record (or rename user)";
+  info->description =
+      "### Purpose\n"
+      "Fully replaces the target user's credentials and role...\n"
+      "### Workflow Example (JavaScript Fetch)\n"
+      "```javascript\n"
+      "const res = await fetch('/users/alice', { ... });\n"
+      "```";
+  info->addTag("users");
   info->authorization = "bearer_auth"; // required WITH the next line
   info->addSecurityRequirement("bearer_auth");
-  info->addResponse<Object<dto::WhoAmIResponseDto>>(Status::CODE_200, "application/json");
+  info->addResponse<Object<dto::UserResponseDto>>(Status::CODE_200, "application/json");
+  info->addResponse<String>(Status::CODE_400, "text/plain");
   info->addResponse<String>(Status::CODE_401, "text/plain");
+  info->addResponse<String>(Status::CODE_403, "text/plain");
+  info->addResponse<String>(Status::CODE_404, "text/plain");
+  info->addResponse<String>(Status::CODE_409, "text/plain");
 }
 #endif // APP_WITH_SWAGGER
 ```
 
 DTO fields follow the same split (`DTO_FIELD_INFO` in the header,
-`Z__PROPERTY_ADD_INFO_*` in `src/dto/AuthDtos.cpp`, only compiled when swagger is on):
+`Z__PROPERTY_ADD_INFO_*` in `src/dto/AuthDtos.cpp` and `src/dto/UserDtos.cpp`, only compiled when swagger is on):
 
 ```cpp
 // header
@@ -69,21 +79,21 @@ DTO_FIELD(String, username);
 ```
 
 ```cpp
-// src/dto/AuthDtos.cpp
+// src/dto/UserDtos.cpp
 #if defined(APP_WITH_SWAGGER)
-void LoginRequestDto::Z__PROPERTY_ADD_INFO_username(
+void UserUpsertDto::Z__PROPERTY_ADD_INFO_username(
     oatpp::data::mapping::type::BaseObject::Property::Info* info) {
   info->required = true;
   info->pattern = "^[a-zA-Z0-9@#$]{4,18}$";
-  info->description = "...";
+  info->description = "Account username identifier (4-18 characters)";
+  info->example = oatpp::String("alice");
 }
 #endif
 ```
 
-Rules:
+## OpenAPI Quality Standards
 
-- List **only** statuses the handler can actually return: real DTO for `200` JSON, `String`/`text/plain` for errors.
-- Authenticated endpoints must set **both** `authorization` and the security
-  requirement — the generator hard-asserts otherwise.
-- Descriptions must state validation rules and the `Authorization: Bearer`
-  scheme so the docs match runtime behavior.
+- **Exhaustive Status Codes:** List all statuses the handler can return: concrete DTO for `200`/`201` JSON, `String`/`text/plain` for error codes (400, 401, 403, 404, 409, 422, 500).
+- **Authentication Dual-Config:** Authenticated endpoints must set **both** `authorization = "bearer_auth"` and `addSecurityRequirement("bearer_auth")` — the generator hard-asserts otherwise.
+- **Frontend-Ready Examples:** Descriptions must include markdown formatting with parameter breakdowns, cURL commands, and JavaScript `fetch()` examples so frontend developers can integrate immediately without guessing.
+- **Rich DTO Annotations:** DTO fields must declare `required`, `pattern`, `description`, and a realistic `example` string to provide complete documentation in Swagger UI.

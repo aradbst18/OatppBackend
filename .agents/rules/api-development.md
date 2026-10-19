@@ -28,6 +28,7 @@ This document defines the strict, machine-enforceable rules for adding new endpo
 2. **Implementation (`.cpp`):**
    - Define endpoint methods returning `std::shared_ptr<OutgoingResponse>`.
    - Validate DTO presence immediately: throw `errors::request::Missing("...")` if required body or properties are null.
+   - Delegate field validation to DTO: invoke `dto->validate()`. Controllers MUST NOT contain manual regex or field length checks.
    - Invoke exactly one service method.
    - Return success using `createDtoResponse(Status::CODE_200, outDto)`.
    - Let `AppException` derivatives bubble up to `AppErrorHandler`.
@@ -46,7 +47,7 @@ This document defines the strict, machine-enforceable rules for adding new endpo
 
 ## 3. DTO Rules
 
-1. **Wire Shapes Only:** DTOs define serializable data transfer objects; they must not contain business logic or database methods.
+1. **Wire Shapes & Self-Validation:** DTOs define serializable data transfer objects; they must not contain business logic or database methods. However, request DTOs declare `void validate() const` in headers and define them in `src/dto/` to enforce field presence and format rules.
 2. **Field Types:**
    - Text: `oatpp::String` (null when omitted in JSON).
    - Standard Integers: `oatpp::Int32` or `oatpp::Int64`.
@@ -55,7 +56,10 @@ This document defines the strict, machine-enforceable rules for adding new endpo
    - Enums: Represented as canonical strings (`"admin"`, `"operator"`), never raw integers.
 3. **Swagger Properties:**
    - Guarded `DTO_FIELD_INFO(name);` in the header under `#ifdef APP_WITH_SWAGGER`.
-   - `Z__PROPERTY_ADD_INFO_name` definitions placed in the matching `.cpp` under `src/dto/`.
+   - `Z__PROPERTY_ADD_INFO_name` definitions placed in the matching `.cpp` under `src/dto/` providing descriptions, patterns, and realistic examples.
+4. **REST Verb Semantics:**
+   - **Full Upsert (`PUT /resource/{id}`):** Replaces complete resource. Body contains all fields plus optional new identifier for rename. Handled via `*UpsertDto`.
+   - **Partial Update (`PATCH /resource/{id}`):** Updates provided fields only. Body contains optional fields. Handled via `Patch*Dto` which enforces that at least one field is provided.
 
 ---
 
@@ -82,6 +86,8 @@ This document defines the strict, machine-enforceable rules for adding new endpo
    - Row DTOs live in `include/app/repositories/` (e.g., `UserDto.hpp`).
 4. **Schema Setup:**
    - Provide an idempotent `ensureSchema()` executing `CREATE TABLE IF NOT EXISTS` and verifying with `tableExists()`.
+5. **Connection Lifetime:**
+   - Scope read results before executing subsequent write queries to avoid exhausting single-connection SQLite pools.
 
 ---
 
@@ -93,6 +99,8 @@ This document defines the strict, machine-enforceable rules for adding new endpo
 - ❌ **No C++20 features** (`std::jthread`, concepts, ranges). C++17 only.
 - ❌ **No unhandled exceptions** or leaking internal stack traces / secrets.
 - ❌ **No detached threads** (`std::thread::detach()` is forbidden).
+- ❌ **No inline controller validation** (delegate to `dto->validate()`).
+- ❌ **No modification/deletion of protected system entities** (e.g. seed admin account returns 403).
 
 ---
 
@@ -101,9 +109,11 @@ This document defines the strict, machine-enforceable rules for adding new endpo
 Before finishing any API addition, verify each item:
 - [ ] Controller constructor receives all services via `std::shared_ptr`.
 - [ ] No Oat++ headers included in service header files.
-- [ ] All request body fields are validated for presence before calling the service.
+- [ ] Incoming DTOs are null-checked and validated via `dto->validate()`.
+- [ ] `PUT` vs `PATCH` semantics are respected (full upsert with rename vs partial update).
+- [ ] Protected system entities (e.g., `admin`) are safeguarded against deletion and rename (403 Forbidden).
 - [ ] Authenticated endpoints specify both `authorization = "bearer_auth"` and `addSecurityRequirement("bearer_auth")`.
 - [ ] New public routes are explicitly added to `AuthInterceptor::publicPaths_`.
-- [ ] Repository queries use `:param` bindings with `PARAM` macros.
+- [ ] Repository queries use `:param` bindings with `PARAM` macros and standard ANSI SQL.
 - [ ] Allman bracing and vertical spacing rules are strictly followed.
-- [ ] Full CTest suite passes with 0 failures (`ctest --test-dir build/debug --output-on-failure`).
+- [ ] Autonomous self-verification completed (clang-format + full CTest suite passes 100%).

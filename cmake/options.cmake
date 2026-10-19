@@ -34,7 +34,6 @@ option(
     "Encrypt the user database (SQLCIPHER only; PostgreSQL encryption is not implemented, see docs/roadmap/postgresql_encryption.md)"
     OFF)
 
-
 set(APP_USERS_DATABASE_TYPE
     "SQLCIPHER"
     CACHE STRING "User database (SQLCIPHER or POSTGRESQL)")
@@ -182,7 +181,6 @@ if(APP_ENCRYPTION_USER_DATABASE AND APP_USERS_DATABASE_TYPE STREQUAL "POSTGRESQL
     message(FATAL_ERROR "APP_ENCRYPTION_USER_DATABASE=ON is not supported with APP_USERS_DATABASE_TYPE=POSTGRESQL "
                         "(see docs/roadmap/postgresql_encryption.md)")
 endif()
-
 
 if(NOT APP_PASSWORD_HASH_ALGO STREQUAL "SHA256"
    AND NOT APP_PASSWORD_HASH_ALGO STREQUAL "SHA384"

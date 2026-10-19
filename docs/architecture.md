@@ -16,20 +16,31 @@ main.cpp
         ├── errors       AppException hierarchy + AppErrorHandler
         ├── repositories BaseRepository + UserRepository/UserDto (QUERY templates over IDatabase::ormExecutor())
         ├── auth         JwtService (jwt-cpp HS256) + PasswordHash (SHA-2 via OpenSSL EVP) — the only crypto owners
-        ├── services     AuthService (credential check + token issuance)
+        ├── services     AuthService (credential check + token issuance), UserService (user CRUD, batch, role management)
         ├── validation   NumericBounds, Validators (user/pass rules)
         ├── serialization RangeValidatingDeserializer + AppObjectMapper
         ├── domain       UserRole (enum class + string mapping)
-        ├── dto          oatpp DTOs (wire shapes only, no logic)
+        ├── dto          oatpp DTOs (wire shapes + validate() self-validation)
         ├── middlewares  AuthInterceptor (Bearer verify + bundle claims)
-        ├── controllers  AuthController, EchoController (DTO in/out only)
+        ├── controllers  AuthController, UserController, EchoController (DTO in/out only)
         ├── websocket    EchoListener / EchoInstanceListener
 ```
 
 Rules:
 
-- Controllers never touch SQL, crypto, or the filesystem. They validate DTO
-  presence, call exactly one service method, and map the result to a DTO.
+- Controllers never touch SQL, crypto, or the filesystem. They null-check the DTO,
+  call `dto->validate()`, invoke exactly one service method, and map the result to a DTO.
+  Controllers never perform manual inline regex or field validation loops.
+- DTOs encapsulate their own schema & format validation via `void validate() const`
+  methods (defined in `src/dto/`), calling pure helper functions in `app::validation::*`
+  and throwing fine-grained `AppException` derivatives (`errors::request::Missing`, `errors::validation::InvalidValue`).
+- REST verbs follow strict semantic contracts:
+  - `PUT /resource/{id}`: Full replacement. Path specifies the current identifier,
+    while body contains all required fields and may specify a new identifier for renaming.
+  - `PATCH /resource/{id}`: Partial update. Path specifies the current identifier,
+    while body contains optional fields (at least one field must be provided; empty body returns 400).
+- Protected entities (such as seeded `admin` accounts) enforce immutability guardrails
+  against deletion (`DELETE`) and renaming (`PUT`/`PATCH`), throwing `ResourceAccessDenied` (403 Forbidden).
 - Services own use-cases. Only `JwtService` touches jwt-cpp; only
   repositories touch `IDatabase`.
 - Repositories own entity SQL: `QUERY` templates with named `:param`
@@ -37,7 +48,7 @@ Rules:
   `docs/guides/adding-repository.md`). Ad-hoc statements (`IDatabase::execute`) use
   `?` bound parameters only. String interpolation of values into SQL is
   forbidden (see `test_database.cpp` injection test).
-- DTOs are wire shapes. Validation lives in `validation/` + service checks,
+- DTOs are wire shapes. Validation lives in `dto->validate()` + `validation/`,
   range enforcement lives in the object mapper.
 - `domain/` types (`UserRole`) are plain C++ (`enum class`). The DTO layer
   carries strings and converts through `toString`/`tryParseUserRole`.
