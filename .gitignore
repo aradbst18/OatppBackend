@@ -73,6 +73,8 @@ logs/
 *.log
 
 # ── Editor & temporary leftovers ────────────────────────────────────
+# Local VS Code overlays mirroring CMakeUserPresets.json
+.vscode/*.user.json
 compile_commands.json
 *~
 *.tmp
