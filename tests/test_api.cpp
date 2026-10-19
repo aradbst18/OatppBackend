@@ -506,3 +506,334 @@ TEST_CASE("api: cors origin filtering unit test")
     EXPECT_TRUE(cors.isOriginAllowed("https://trusted.example.com"));
     EXPECT_FALSE(cors.isOriginAllowed("https://evil.com"));
 }
+
+namespace
+{
+
+std::string getAdminToken(int port)
+{
+    const std::string payload = R"({"username":"admin","password":"Admin1234"})";
+    const std::string req =
+        "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
+        std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;
+    const std::string resp = httpRoundTrip("127.0.0.1", port, req);
+    const std::string body = bodyOf(resp);
+    const std::string key = "\"access_token\":\"";
+    const auto pos = body.find(key);
+    if (pos == std::string::npos)
+    {
+        return "";
+    }
+
+    const auto endPos = body.find('"', pos + key.size());
+    return body.substr(pos + key.size(), endPos - pos - key.size());
+}
+
+}  // namespace
+
+TEST_CASE("api: users get - list and single user")
+{
+    // Arrange
+    auto srv = startServer();
+    const std::string token = getAdminToken(srv->port);
+    EXPECT_FALSE(token.empty());
+
+    // Act - list users without token fails with 401
+    const std::string unauthReq = "GET /users HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    const std::string unauthResp = httpRoundTrip("127.0.0.1", srv->port, unauthReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(unauthResp), 401);
+
+    // Act - list users with token
+    const std::string listReq =
+        "GET /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string listResp = httpRoundTrip("127.0.0.1", srv->port, listReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(listResp), 200);
+    EXPECT_TRUE(bodyOf(listResp).find("\"username\":\"admin\"") != std::string::npos);
+
+    // Act - get single existing user
+    const std::string getReq =
+        "GET /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string getResp = httpRoundTrip("127.0.0.1", srv->port, getReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(getResp), 200);
+    EXPECT_TRUE(bodyOf(getResp).find("\"username\":\"admin\"") != std::string::npos);
+    EXPECT_TRUE(bodyOf(getResp).find("\"role\":\"admin\"") != std::string::npos);
+
+    // Act - get single non-existent user
+    const std::string missingReq = "GET /users/nonexistent_user HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+                                   "\r\nConnection: close\r\n\r\n";
+    const std::string missingResp = httpRoundTrip("127.0.0.1", srv->port, missingReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(missingResp), 404);
+}
+
+TEST_CASE("api: users add - single user and batch list")
+{
+    // Arrange
+    auto srv = startServer();
+    const std::string token = getAdminToken(srv->port);
+    EXPECT_FALSE(token.empty());
+
+    // Act - add single user
+    const std::string singlePayload = R"({"username":"alice","password":"AlicePassword1","role":"operator"})";
+    const std::string singleReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(singlePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + singlePayload;
+    const std::string singleResp = httpRoundTrip("127.0.0.1", srv->port, singleReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(singleResp), 201);
+    EXPECT_TRUE(bodyOf(singleResp).find("\"username\":\"alice\"") != std::string::npos);
+    EXPECT_TRUE(bodyOf(singleResp).find("\"role\":\"operator\"") != std::string::npos);
+
+    // Act - duplicate user fails with 409 Conflict
+    const std::string dupResp = httpRoundTrip("127.0.0.1", srv->port, singleReq);
+    EXPECT_EQ(statusOf(dupResp), 409);
+
+    // Act - invalid password fails with 422
+    const std::string invalidPayload = R"({"username":"alice2","password":"short","role":"viewer"})";
+    const std::string invalidReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(invalidPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + invalidPayload;
+    const std::string invalidResp = httpRoundTrip("127.0.0.1", srv->port, invalidReq);
+    EXPECT_EQ(statusOf(invalidResp), 422);
+
+    // Act - add multiple users as array to POST /users
+    const std::string batchPayload =
+        R"([{"username":"bob1","password":"BobPassword1","role":"viewer"},{"username":"bob2","password":"BobPassword2","role":"operator"}])";
+    const std::string batchReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(batchPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + batchPayload;
+    const std::string batchResp = httpRoundTrip("127.0.0.1", srv->port, batchReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(batchResp), 201);
+    EXPECT_TRUE(bodyOf(batchResp).find("\"username\":\"bob1\"") != std::string::npos);
+    EXPECT_TRUE(bodyOf(batchResp).find("\"username\":\"bob2\"") != std::string::npos);
+
+    // Act - explicit batch endpoint POST /users/batch
+    const std::string explicitPayload = R"([{"username":"bob3","password":"BobPassword3","role":"viewer"}])";
+    const std::string explicitReq =
+        "POST /users/batch HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(explicitPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + explicitPayload;
+    const std::string explicitResp = httpRoundTrip("127.0.0.1", srv->port, explicitReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(explicitResp), 201);
+
+    // Assert all created users can be fetched
+    const std::string getBobReq =
+        "GET /users/bob3 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string getBobResp = httpRoundTrip("127.0.0.1", srv->port, getBobReq);
+    EXPECT_EQ(statusOf(getBobResp), 200);
+}
+
+TEST_CASE("api: users update - full update and patch")
+{
+    // Arrange
+    auto srv = startServer();
+    const std::string token = getAdminToken(srv->port);
+    EXPECT_FALSE(token.empty());
+
+    // Create user charlie
+    const std::string createPayload = R"({"username":"charlie","password":"CharliePassword1","role":"viewer"})";
+    const std::string createReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(createPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + createPayload;
+    const std::string createResp = httpRoundTrip("127.0.0.1", srv->port, createReq);
+    EXPECT_EQ(statusOf(createResp), 201);
+
+    // Act - Full update via PUT /users/charlie keeping same username
+    const std::string putSameNamePayload = R"({"username":"charlie","password":"NewCharliePassword1","role":"admin"})";
+    const std::string putSameNameReq =
+        "PUT /users/charlie HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(putSameNamePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + putSameNamePayload;
+    const std::string putSameNameResp = httpRoundTrip("127.0.0.1", srv->port, putSameNameReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(putSameNameResp), 200);
+    EXPECT_TRUE(bodyOf(putSameNameResp).find("\"role\":\"admin\"") != std::string::npos);
+
+    // Act - Verify login with newly set password
+    const std::string loginPayload = R"({"username":"charlie","password":"NewCharliePassword1"})";
+    const std::string loginReq =
+        "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
+        std::to_string(loginPayload.size()) + "\r\nConnection: close\r\n\r\n" + loginPayload;
+    const std::string loginResp = httpRoundTrip("127.0.0.1", srv->port, loginReq);
+    EXPECT_EQ(statusOf(loginResp), 200);
+
+    // Act - PUT changing username from charlie to charlie2
+    const std::string putRenamePayload = R"({"username":"charlie2","password":"Charlie2Password1","role":"operator"})";
+    const std::string putRenameReq =
+        "PUT /users/charlie HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(putRenamePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + putRenamePayload;
+    const std::string putRenameResp = httpRoundTrip("127.0.0.1", srv->port, putRenameReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(putRenameResp), 200);
+    EXPECT_TRUE(bodyOf(putRenameResp).find("\"username\":\"charlie2\"") != std::string::npos);
+
+    // Verify old username is gone and new username exists
+    const std::string getOldReq =
+        "GET /users/charlie HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, getOldReq)), 404);
+
+    const std::string getNewReq =
+        "GET /users/charlie2 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, getNewReq)), 200);
+
+    // Act - PUT attempting to rename default admin is blocked with 403 Forbidden
+    const std::string putAdminRenamePayload = R"({"username":"superadmin","password":"AdminPassword1","role":"admin"})";
+    const std::string putAdminRenameReq =
+        "PUT /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(putAdminRenamePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + putAdminRenamePayload;
+    const std::string putAdminRenameResp = httpRoundTrip("127.0.0.1", srv->port, putAdminRenameReq);
+    EXPECT_EQ(statusOf(putAdminRenameResp), 403);
+
+    // Act - Partial update (role only) via PATCH /users/charlie2
+    const std::string patchRolePayload = R"({"role":"viewer"})";
+    const std::string patchRoleReq =
+        "PATCH /users/charlie2 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(patchRolePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + patchRolePayload;
+    const std::string patchRoleResp = httpRoundTrip("127.0.0.1", srv->port, patchRoleReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(patchRoleResp), 200);
+    EXPECT_TRUE(bodyOf(patchRoleResp).find("\"role\":\"viewer\"") != std::string::npos);
+
+    // Act - Partial update (password only) via PATCH /users/charlie2
+    const std::string patchPassPayload = R"({"password":"PatchedPassword1"})";
+    const std::string patchPassReq =
+        "PATCH /users/charlie2 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(patchPassPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + patchPassPayload;
+    const std::string patchPassResp = httpRoundTrip("127.0.0.1", srv->port, patchPassReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(patchPassResp), 200);
+
+    // Verify login with patched password
+    const std::string patchedLoginPayload = R"({"username":"charlie2","password":"PatchedPassword1"})";
+    const std::string patchedLoginReq =
+        "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
+        std::to_string(patchedLoginPayload.size()) + "\r\nConnection: close\r\n\r\n" + patchedLoginPayload;
+    const std::string patchedLoginResp = httpRoundTrip("127.0.0.1", srv->port, patchedLoginReq);
+    EXPECT_EQ(statusOf(patchedLoginResp), 200);
+
+    // Act - Partial update (username only) via PATCH /users/charlie2
+    const std::string patchUsernamePayload = R"({"username":"charlie3"})";
+    const std::string patchUsernameReq =
+        "PATCH /users/charlie2 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(patchUsernamePayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + patchUsernamePayload;
+    const std::string patchUsernameResp = httpRoundTrip("127.0.0.1", srv->port, patchUsernameReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(patchUsernameResp), 200);
+    EXPECT_TRUE(bodyOf(patchUsernameResp).find("\"username\":\"charlie3\"") != std::string::npos);
+
+    // Act - Empty PATCH body fails validation with 400 Bad Request
+    const std::string emptyPatchPayload = R"({})";
+    const std::string emptyPatchReq =
+        "PATCH /users/charlie3 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(emptyPatchPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + emptyPatchPayload;
+    const std::string emptyPatchResp = httpRoundTrip("127.0.0.1", srv->port, emptyPatchReq);
+    EXPECT_EQ(statusOf(emptyPatchResp), 400);
+
+    // Act - Updating non-existent user returns 404
+    const std::string nonExistentPutPayload = R"({"username":"nonexistent","password":"Password123","role":"viewer"})";
+    const std::string nonExistentPutReq =
+        "PUT /users/nonexistent HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(nonExistentPutPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + nonExistentPutPayload;
+    const std::string nonExistentPutResp = httpRoundTrip("127.0.0.1", srv->port, nonExistentPutReq);
+    EXPECT_EQ(statusOf(nonExistentPutResp), 404);
+}
+
+TEST_CASE("api: users delete - single and all users with admin protection")
+{
+    // Arrange
+    auto srv = startServer();
+    const std::string token = getAdminToken(srv->port);
+    EXPECT_FALSE(token.empty());
+
+    // Create user dave
+    const std::string createPayload = R"({"username":"dave","password":"DavePassword1","role":"viewer"})";
+    const std::string createReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(createPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + createPayload;
+    const std::string createResp = httpRoundTrip("127.0.0.1", srv->port, createReq);
+    EXPECT_EQ(statusOf(createResp), 201);
+
+    // Act - Delete user dave
+    const std::string deleteDaveReq =
+        "DELETE /users/dave HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string deleteDaveResp = httpRoundTrip("127.0.0.1", srv->port, deleteDaveReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(deleteDaveResp), 200);
+
+    // Verify dave no longer exists
+    const std::string getDaveReq =
+        "GET /users/dave HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string getDaveResp = httpRoundTrip("127.0.0.1", srv->port, getDaveReq);
+    EXPECT_EQ(statusOf(getDaveResp), 404);
+
+    // Act - Attempting to delete default admin user fails with 403 Forbidden
+    const std::string deleteAdminReq =
+        "DELETE /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string deleteAdminResp = httpRoundTrip("127.0.0.1", srv->port, deleteAdminReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(deleteAdminResp), 403);
+
+    // Verify admin user still exists
+    const std::string getAdminReq =
+        "GET /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string getAdminResp = httpRoundTrip("127.0.0.1", srv->port, getAdminReq);
+    EXPECT_EQ(statusOf(getAdminResp), 200);
+
+    // Act - Create another user then delete all users
+    const std::string createEvelynPayload = R"({"username":"evelyn","password":"EvePassword1","role":"operator"})";
+    const std::string createEvelynReq =
+        "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+        "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(createEvelynPayload.size()) +
+        "\r\nConnection: close\r\n\r\n" + createEvelynPayload;
+    const std::string createEvelynResp = httpRoundTrip("127.0.0.1", srv->port, createEvelynReq);
+    EXPECT_EQ(statusOf(createEvelynResp), 201);
+
+    const std::string deleteAllReq =
+        "DELETE /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string deleteAllResp = httpRoundTrip("127.0.0.1", srv->port, deleteAllReq);
+
+    // Assert
+    EXPECT_EQ(statusOf(deleteAllResp), 200);
+    EXPECT_TRUE(bodyOf(deleteAllResp).find("\"deleted_count\":") != std::string::npos);
+
+    // Verify admin is still present
+    const std::string getAdminAfterResp = httpRoundTrip("127.0.0.1", srv->port, getAdminReq);
+    EXPECT_EQ(statusOf(getAdminAfterResp), 200);
+
+    // Verify evelyn was deleted
+    const std::string getEvelynReq =
+        "GET /users/evelyn HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
+    const std::string getEvelynResp = httpRoundTrip("127.0.0.1", srv->port, getEvelynReq);
+    EXPECT_EQ(statusOf(getEvelynResp), 404);
+}
