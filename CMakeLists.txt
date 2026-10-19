@@ -36,6 +36,7 @@ add_library(
     src/validation/Validators.cpp
     src/serialization/AppObjectMapper.cpp
     src/domain/UserRole.cpp
+    src/dto/UserDtos.cpp
     src/infrastructure/TextFile.cpp
     src/infrastructure/documents/DocumentValue.cpp
     src/config/AppSettings.cpp
@@ -50,7 +51,9 @@ add_library(
     src/auth/JwtService.cpp
     src/auth/PasswordHash.cpp
     src/services/AuthService.cpp
+    src/services/UserService.cpp
     src/controllers/AuthController.cpp
+    src/controllers/UserController.cpp
     src/controllers/EchoController.cpp
     src/middlewares/AuthInterceptor.cpp
     src/middlewares/CorsInterceptor.cpp

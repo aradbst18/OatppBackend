@@ -11,6 +11,7 @@
 #include "app/repositories/RefreshTokenRepository.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/services/AuthService.hpp"
+#include "app/services/UserService.hpp"
 
 namespace oatpp::web::server
 {
@@ -85,6 +86,7 @@ public:
 
     // Exposed for integration tests.
     std::shared_ptr<services::AuthService> authService();
+    std::shared_ptr<services::UserService> userService();
     std::shared_ptr<auth::JwtService> jwtService();
     std::shared_ptr<infrastructure::database::IDatabase> database();
     std::shared_ptr<repositories::RefreshTokenRepository> refreshTokenRepository();
@@ -110,6 +112,7 @@ private:
     std::shared_ptr<repositories::RefreshTokenRepository> refreshTokens_;
     std::shared_ptr<auth::JwtService> jwt_;
     std::shared_ptr<services::AuthService> auth_;
+    std::shared_ptr<services::UserService> userService_;
 };
 
 /// Operational startup sequence (see docs/configuration.md):

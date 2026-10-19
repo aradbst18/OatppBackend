@@ -26,6 +26,7 @@
 #include "app/config/VersionFile.hpp"
 #include "app/controllers/AuthController.hpp"
 #include "app/controllers/EchoController.hpp"
+#include "app/controllers/UserController.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/errors/ErrorMapper.hpp"
 #include "app/infrastructure/TextFile.hpp"
@@ -232,6 +233,7 @@ void Application::initServices()
     auth_ = std::make_shared<services::AuthService>(users_, jwt_, refreshTokens_);
     auth_->ensureSeeded();
 
+    userService_ = std::make_shared<services::UserService>(users_, services::AuthService::kDefaultSeedUsername);
     logging::logInfo("app", "Services initialized");
 }
 
@@ -246,15 +248,18 @@ void Application::initRouting()
     websocketHandler_ = wsHandler;
 
     auto authController = std::make_shared<controllers::AuthController>(objectMapper, auth_, jwt_);
+    auto userController = std::make_shared<controllers::UserController>(objectMapper, userService_, jwt_);
     auto echoController = std::make_shared<controllers::EchoController>(objectMapper, websocketHandler_);
 
     router_->addController(authController);
+    router_->addController(userController);
     router_->addController(echoController);
 
 #ifdef APP_WITH_SWAGGER
     // Swagger needs the merged endpoint list; collect from our controllers.
     oatpp::web::server::api::Endpoints merged;
     merged.append(authController->getEndpoints());
+    merged.append(userController->getEndpoints());
     merged.append(echoController->getEndpoints());
     infrastructure::registerSwaggerWithEndpoints(router_, merged, settings_.swaggerResPath);
 #endif  // APP_WITH_SWAGGER
@@ -360,6 +365,12 @@ std::shared_ptr<services::AuthService> Application::authService()
 {
     initialize();
     return auth_;
+}
+
+std::shared_ptr<services::UserService> Application::userService()
+{
+    initialize();
+    return userService_;
 }
 
 std::shared_ptr<auth::JwtService> Application::jwtService()

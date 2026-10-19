@@ -45,8 +45,28 @@ public:
     /// All users, ordered by username.
     oatpp::Vector<oatpp::Object<UserDto>> listUsers();
 
+    /// Updates only the password hash of an existing user.
+    /// Throws RecordNotFound when the username does not exist.
+    void updatePassword(const oatpp::String& username, const oatpp::String& passwordHash);
+
+    /// Updates only the role of an existing user.
+    /// Throws RecordNotFound when the username does not exist.
+    void updateRole(const oatpp::String& username, const oatpp::String& role);
+
+    /// Updates only the username of an existing user.
+    /// Throws RecordNotFound when currentUsername does not exist.
+    void updateUsername(const oatpp::String& currentUsername, const oatpp::String& newUsername);
+
+    /// Updates username, password hash, and role of an existing user.
+    /// Throws RecordNotFound when currentUsername does not exist.
+    void updateUserWithNewUsername(const oatpp::String& currentUsername, const oatpp::String& newUsername,
+                                   const oatpp::String& passwordHash, const oatpp::String& role);
+
     /// Deletes the user; a missing username is a no-op (idempotent).
     void deleteUser(const oatpp::String& username);
+
+    /// Deletes all users except `excludeUsername`. Returns count of deleted records.
+    std::int64_t deleteUsersExcept(const oatpp::String& excludeUsername);
 
 private:
     /// Rejects a missing DTO and empty or non-canonical fields before SQL.
@@ -67,6 +87,24 @@ private:
               ":user.username;",
           PARAM(oatpp::Object<UserDto>, user))
 
+    QUERY(updatePasswordImp,
+          "UPDATE " + tableName() + " SET password_hash = :password_hash WHERE username = :username;",
+          PARAM(oatpp::String, username), PARAM(oatpp::String, password_hash))
+
+    QUERY(updateRoleImp, "UPDATE " + tableName() + " SET role = :role WHERE username = :username;",
+          PARAM(oatpp::String, username), PARAM(oatpp::String, role))
+
+    QUERY(updateUsernameImp,
+          "UPDATE " + tableName() + " SET username = :newUsername WHERE username = :currentUsername;",
+          PARAM(oatpp::String, currentUsername), PARAM(oatpp::String, newUsername))
+
+    QUERY(updateUserWithNewUsernameImp,
+          "UPDATE " + tableName() +
+              " SET username = :newUsername, password_hash = :passwordHash, role = :role WHERE username = "
+              ":currentUsername;",
+          PARAM(oatpp::String, currentUsername), PARAM(oatpp::String, newUsername), PARAM(oatpp::String, passwordHash),
+          PARAM(oatpp::String, role))
+
     QUERY(findUserImp, "SELECT username, password_hash, role FROM " + tableName() + " WHERE username = :username;",
           PARAM(oatpp::String, username))
 
@@ -76,6 +114,12 @@ private:
           PARAM(oatpp::String, username))
 
     QUERY(deleteUserImp, "DELETE FROM " + tableName() + " WHERE username = :username;", PARAM(oatpp::String, username))
+
+    QUERY(countUsersExceptImp, "SELECT count(*) AS count FROM " + tableName() + " WHERE username != :excludeUsername;",
+          PARAM(oatpp::String, excludeUsername))
+
+    QUERY(deleteUsersExceptImp, "DELETE FROM " + tableName() + " WHERE username != :excludeUsername;",
+          PARAM(oatpp::String, excludeUsername))
 };
 
 }  // namespace app::repositories

@@ -115,4 +115,118 @@ void UserRepository::deleteUser(const oatpp::String& username)
     deleteUserImp(username);
 }
 
+void UserRepository::updatePassword(const oatpp::String& username, const oatpp::String& passwordHash)
+{
+    if (!username || username->empty())
+    {
+        throw errors::validation::InvalidValue("username is required");
+    }
+
+    if (!passwordHash || passwordHash->empty())
+    {
+        throw errors::validation::InvalidValue("password_hash is required");
+    }
+
+    if (!isUserExists(username))
+    {
+        throw errors::database::RecordNotFound("username(" + textOf(username) + ") does not exist");
+    }
+
+    updatePasswordImp(username, passwordHash);
+}
+
+void UserRepository::updateRole(const oatpp::String& username, const oatpp::String& role)
+{
+    if (!username || username->empty())
+    {
+        throw errors::validation::InvalidValue("username is required");
+    }
+
+    if (!role || role->empty())
+    {
+        throw errors::validation::InvalidValue("role is required");
+    }
+
+    domain::UserRole parsed{};
+    if (!domain::tryParseUserRole(*role, parsed))
+    {
+        throw errors::validation::InvalidValue("unknown user role: '" + textOf(role) + "'");
+    }
+
+    if (!isUserExists(username))
+    {
+        throw errors::database::RecordNotFound("username(" + textOf(username) + ") does not exist");
+    }
+
+    updateRoleImp(username, role);
+}
+
+void UserRepository::updateUsername(const oatpp::String& currentUsername, const oatpp::String& newUsername)
+{
+    if (!currentUsername || currentUsername->empty())
+    {
+        throw errors::validation::InvalidValue("current_username is required");
+    }
+
+    if (!newUsername || newUsername->empty())
+    {
+        throw errors::validation::InvalidValue("new_username is required");
+    }
+
+    if (!isUserExists(currentUsername))
+    {
+        throw errors::database::RecordNotFound("username(" + textOf(currentUsername) + ") does not exist");
+    }
+
+    updateUsernameImp(currentUsername, newUsername);
+}
+
+void UserRepository::updateUserWithNewUsername(const oatpp::String& currentUsername, const oatpp::String& newUsername,
+                                               const oatpp::String& passwordHash, const oatpp::String& role)
+{
+    if (!currentUsername || currentUsername->empty())
+    {
+        throw errors::validation::InvalidValue("current_username is required");
+    }
+
+    if (!newUsername || newUsername->empty())
+    {
+        throw errors::validation::InvalidValue("new_username is required");
+    }
+
+    if (!passwordHash || passwordHash->empty())
+    {
+        throw errors::validation::InvalidValue("password_hash is required");
+    }
+
+    if (!role || role->empty())
+    {
+        throw errors::validation::InvalidValue("role is required");
+    }
+
+    if (!isUserExists(currentUsername))
+    {
+        throw errors::database::RecordNotFound("username(" + textOf(currentUsername) + ") does not exist");
+    }
+
+    updateUserWithNewUsernameImp(currentUsername, newUsername, passwordHash, role);
+}
+
+std::int64_t UserRepository::deleteUsersExcept(const oatpp::String& excludeUsername)
+{
+    std::int64_t count = 0;
+    {
+        const auto countResult = countUsersExceptImp(excludeUsername);
+        const auto rows = fetch<oatpp::Vector<oatpp::Fields<oatpp::Int64>>>(countResult);
+        if (!rows->empty())
+        {
+            count = rows->front()["count"].getValue(0);
+        }
+    }
+
+    deleteUsersExceptImp(excludeUsername);
+
+    return count;
+}
+
 }  // namespace app::repositories

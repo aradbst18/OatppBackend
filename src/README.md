@@ -21,11 +21,13 @@ Visual layout of C++ implementation files located under `src/`.
     │   └── YamlConfigStore.cpp
     ├── 📁controllers
     │   ├── AuthController.cpp
-    │   └── EchoController.cpp
+    │   ├── EchoController.cpp
+    │   └── UserController.cpp
     ├── 📁domain
     │   └── UserRole.cpp
     ├── 📁dto
-    │   └── AuthDtos.cpp
+    │   ├── AuthDtos.cpp
+    │   └── UserDtos.cpp
     ├── 📁errors
     │   ├── AppException.cpp
     │   └── ErrorMapper.cpp
@@ -62,7 +64,8 @@ Visual layout of C++ implementation files located under `src/`.
     ├── 📁serialization
     │   └── AppObjectMapper.cpp
     ├── 📁services
-    │   └── AuthService.cpp
+    │   ├── AuthService.cpp
+    │   └── UserService.cpp
     ├── 📁validation
     │   └── Validators.cpp
     ├── 📁websocket
@@ -77,16 +80,16 @@ Visual layout of C++ implementation files located under `src/`.
 | **`application/`** | Process bootstrap and shutdown sequences, managed thread lifecycles, and POSIX signal handlers |
 | **`auth/`** | OpenSSL EVP password hashing with salt verification and jwt-cpp token encoding/decoding |
 | **`config/`** | JSON, TOML, XML, and YAML configuration loading with fallback auto-completion and version parsing |
-| **`controllers/`** | HTTP request routing, header parsing, payload extraction, and DTO response dispatching |
+| **`controllers/`** | HTTP request routing, header parsing, payload extraction, and DTO response dispatching (`AuthController`, `UserController`, `EchoController`) |
 | **`domain/`** | Domain enumeration parsing and string conversions (`UserRole`) |
-| **`dto/`** | Oat++ DTO field macros and serialization bindings |
+| **`dto/`** | Oat++ DTO field macros, self-validation logic (`validate()`), and Swagger metadata definitions (`AuthDtos`, `UserDtos`) |
 | **`errors/`** | Exception construction, HTTP status code translation, and error payload formatting |
 | **`infrastructure/`** | Dual-backend database connections (SQLCipher & PostgreSQL), document tree serialization, and Swagger setup |
 | **`logging/`** | Thread-safe, non-blocking log appenders with console formatting and Oat++ framework log redirection |
 | **`middlewares/`** | Pipeline interceptors verifying JWT Bearer tokens, appending CORS headers, and enforcing request rate limits |
 | **`repositories/`** | SQL query execution, result-set cursor mapping, and schema initialization via `ensureSchema()` |
 | **`serialization/`** | Oat++ ObjectMapper customization with strict range validation deserializers |
-| **`services/`** | Core business use cases (authentication, credential verification, refresh token generation) |
+| **`services/`** | Core business use cases (authentication, credential verification, refresh token lifecycle, user CRUD and role management) |
 | **`validation/`** | Regex and rule-based validation for usernames, passwords, and numerical field bounds |
 | **`websocket/`** | Real-time WebSocket connection handling, message frames, and ping/pong keep-alives |
 | **`main.cpp`** | Process entry point parsing CLI arguments, initializing configuration, and invoking `Application::run()` |

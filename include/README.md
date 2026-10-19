@@ -18,11 +18,13 @@ Visual layout of public headers and interface definitions located under `include
         │   └── VersionFile.hpp
         ├── 📁controllers
         │   ├── AuthController.hpp
-        │   └── EchoController.hpp
+        │   ├── EchoController.hpp
+        │   └── UserController.hpp
         ├── 📁domain
         │   └── UserRole.hpp
         ├── 📁dto
-        │   └── AuthDtos.hpp
+        │   ├── AuthDtos.hpp
+        │   └── UserDtos.hpp
         ├── 📁errors
         │   ├── AppException.hpp
         │   └── ErrorMapper.hpp
@@ -63,7 +65,8 @@ Visual layout of public headers and interface definitions located under `include
         │   ├── AppObjectMapper.hpp
         │   └── RangeValidatingDeserializer.hpp
         ├── 📁services
-        │   └── AuthService.hpp
+        │   ├── AuthService.hpp
+        │   └── UserService.hpp
         ├── 📁validation
         │   ├── NumericBounds.hpp
         │   └── Validators.hpp
@@ -78,15 +81,15 @@ Visual layout of public headers and interface definitions located under `include
 | **`application/`** | Process lifecycle orchestration, managed background threads (`ManagedThread`), and signal termination handlers |
 | **`auth/`** | JWT token lifecycle management (`JwtService`) and cryptographic password hashing (`PasswordHash`) |
 | **`config/`** | Strongly-typed application settings (`AppSettings`), 4-store configuration parser interfaces, and version file loader |
-| **`controllers/`** | Oat++ REST API endpoint controllers (`AuthController`, `EchoController`) operating strictly on DTOs |
+| **`controllers/`** | Oat++ REST API endpoint controllers (`AuthController`, `UserController`, `EchoController`) operating strictly on DTOs |
 | **`domain/`** | Core business domain models and types (`UserRole`) free from framework dependencies |
-| **`dto/`** | Data Transfer Objects representing API wire models and serialized request/response contracts |
+| **`dto/`** | Data Transfer Objects representing API wire models and serialized request/response contracts (`AuthDtos`, `UserDtos`) with `validate()` self-validation |
 | **`errors/`** | Domain exception hierarchy (`AppException`) and framework error mapper (`ErrorMapper`) |
 | **`infrastructure/`** | Database abstraction (`IDatabase`, SQLCipher, PostgreSQL), generic document parsers, GZIP compression, and Swagger |
 | **`logging/`** | Thread-safe logging subsystem (`Logger`) and Oat++ log bridge integration (`OatppLoggerBridge`) |
 | **`middlewares/`** | HTTP request interceptors for Bearer token verification, CORS headers, and token-bucket rate limiting |
 | **`repositories/`** | Persistence abstraction layer and ORM query templates over `DatabaseExecutor` |
 | **`serialization/`** | JSON object mapper configuration (`AppObjectMapper`) and range-validating deserializers |
-| **`services/`** | Pure C++ business logic use cases (`AuthService`) decoupled from Oat++ HTTP layer |
+| **`services/`** | Pure C++ business logic use cases (`AuthService`, `UserService`) decoupled from Oat++ HTTP layer |
 | **`validation/`** | Input validation rules, username/password constraints, and numeric range bounds |
 | **`websocket/`** | WebSocket connection listeners and real-time event handlers (`EchoListener`) |
