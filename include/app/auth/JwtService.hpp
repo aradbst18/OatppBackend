@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <string>
 
 namespace app::auth
@@ -8,11 +9,12 @@ namespace app::auth
 
 struct TokenClaims
 {
-    std::string subject;  // username
+    std::string subject;  // immutable account ID
     std::string role;     // canonical role string
     std::string issuer;
     std::chrono::system_clock::time_point issuedAt{};
     std::chrono::system_clock::time_point expiresAt{};
+    std::int64_t sessionVersion{-1};
 
     TokenClaims() = default;
     TokenClaims(TokenClaims&&) noexcept = default;
@@ -36,7 +38,7 @@ public:
     JwtService(std::string secret, std::string issuer, std::chrono::seconds ttl);
 
     /// Create a signed token for subject/role.
-    std::string create(const std::string& subject, const std::string& role) const;
+    std::string create(const std::string& subject, const std::string& role, std::int64_t sessionVersion = 0) const;
 
     /// Verify signature + issuer + expiry. Throws Unauthorized on any failure.
     TokenClaims verify(const std::string& token) const;

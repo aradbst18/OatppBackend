@@ -1,6 +1,8 @@
 #include "support/TestRunner.hpp"
 
 #include <chrono>
+#include <filesystem>
+#include <future>
 #include <vector>
 
 #include <jwt-cpp/jwt.h>
@@ -8,12 +10,15 @@
 #include "support/ScopedEnvironment.hpp"
 #include "support/TestDb.hpp"
 
+#include "app/application/ManagedThread.hpp"
 #include "app/auth/JwtService.hpp"
+#include "app/auth/PasswordHash.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/infrastructure/database/DatabaseFactory.hpp"
 #include "app/repositories/RefreshTokenRepository.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/services/AuthService.hpp"
+#include "app/services/UserService.hpp"
 
 using namespace app;
 
@@ -26,17 +31,32 @@ constexpr const char* kTestAdminPassword = "TestAdmin8391";
 
 struct AuthFixture
 {
+    std::shared_ptr<infrastructure::database::IDatabase> db;
     std::shared_ptr<repositories::UserRepository> users;
+    std::shared_ptr<repositories::RefreshTokenRepository> tokens;
+    std::shared_ptr<auth::JwtService> jwt;
     std::shared_ptr<services::AuthService> service;
 
-    explicit AuthFixture(const std::string& secret = kTestSecret)
+    explicit AuthFixture(const std::string& secret = kTestSecret, const std::string& path = ":memory:")
     {
-        auto db = tests::createTestDatabase();
+        db = tests::createTestDatabase(path);
         db->open();
         users = std::make_shared<repositories::UserRepository>(db);
         users->ensureSchema();
-        auto jwt = std::make_shared<auth::JwtService>(secret, "test-issuer", std::chrono::seconds(3600));
-        service = std::make_shared<services::AuthService>(users, jwt);
+        tokens = std::make_shared<repositories::RefreshTokenRepository>(db);
+        tokens->ensureSchema();
+        jwt = std::make_shared<auth::JwtService>(secret, "test-issuer", std::chrono::seconds(3600));
+        service = std::make_shared<services::AuthService>(users, jwt, tokens);
+    }
+};
+
+struct TemporaryDatabaseFile
+{
+    std::string path = "/tmp/oatpp-cpp004-" + auth::sha256Hex(auth::generateRandomSecret(16)) + ".db";
+    ~TemporaryDatabaseFile()
+    {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
     }
 };
 
@@ -264,14 +284,12 @@ TEST_CASE("auth: login rejects malformed input with 422")
     EXPECT_THROW_AS(svc->login("admin", "short"), errors::validation::InvalidValue);
 }
 
-TEST_CASE("auth: whoami echoes claims")
+TEST_CASE("auth: whoami resolves the current account by immutable identity")
 {
     auto svc = makeService();
 
-    auth::TokenClaims claims;
-    claims.subject = "admin";
-    claims.role = "admin";
-    claims.issuer = "test-issuer";
+    const auto login = svc->login("admin", kTestAdminPassword);
+    const auto claims = svc->authenticate(login.accessToken);
 
     const services::LoginResult r = svc->whoAmI(claims);
     EXPECT_EQ(r.username, std::string("admin"));
@@ -380,4 +398,307 @@ TEST_CASE("auth: expired refresh token is rejected")
     EXPECT_FALSE(loginRes.refreshToken.empty());
 
     EXPECT_THROW_AS(svc->refresh(loginRes.refreshToken), errors::authentication::TokenExpired);
+}
+
+TEST_CASE("auth: password changes invalidate existing refresh tokens")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    auto users = std::make_shared<repositories::UserRepository>(db);
+    users->ensureSchema();
+    auto tokens = std::make_shared<repositories::RefreshTokenRepository>(db);
+    tokens->ensureSchema();
+    auto jwt = std::make_shared<auth::JwtService>(kTestSecret, "test-issuer", std::chrono::seconds(3600));
+    services::AuthService authService(users, jwt, tokens);
+    services::UserService userService(users);
+    userService.createUser({"alice", "AlicePass123", "viewer"});
+    const auto login = authService.login("alice", "AlicePass123");
+
+    services::PatchUserInput patch;
+    patch.password = "ChangedPass456";
+    userService.patchUser("alice", patch);
+
+    EXPECT_THROW_AS(authService.refresh(login.refreshToken), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(authService.authenticate(login.accessToken), errors::authentication::InvalidToken);
+    EXPECT_FALSE(authService.login("alice", "ChangedPass456").refreshToken.empty());
+}
+
+TEST_CASE("auth: full password updates invalidate all sessions and preserve account identity")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto first = fixture.service->login("alice", "AlicePass123");
+    const auto second = fixture.service->login("alice", "AlicePass123");
+    const auto before = fixture.users->getUser("alice");
+    users.updateUser("alice", {"alice", "ChangedPass456", "viewer"});
+
+    EXPECT_EQ(std::string(*fixture.users->getUser("alice")->id), std::string(*before->id));
+    for (const auto& login : {first, second})
+    {
+        EXPECT_THROW_AS(fixture.service->refresh(login.refreshToken), errors::authentication::InvalidToken);
+        EXPECT_THROW_AS(fixture.service->authenticate(login.accessToken), errors::authentication::InvalidToken);
+    }
+    EXPECT_THROW_AS(fixture.service->login("alice", "AlicePass123"), errors::authentication::InvalidCredentials);
+    const auto fresh = fixture.service->login("alice", "ChangedPass456");
+    EXPECT_EQ(fixture.service->whoAmI(fixture.service->authenticate(fresh.accessToken)).username, std::string("alice"));
+}
+
+TEST_CASE("auth: deleting and recreating a username cannot transfer its previous sessions")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto old = fixture.service->login("alice", "AlicePass123");
+    const std::string oldId = *fixture.users->getUser("alice")->id;
+    users.deleteUser("alice");
+    EXPECT_THROW_AS(fixture.tokens->getToken(old.refreshToken), errors::database::RecordNotFound);
+    EXPECT_THROW_AS(fixture.service->authenticate(old.accessToken), errors::authentication::InvalidToken);
+    users.createUser({"alice", "Replacement456", "admin"});
+
+    EXPECT_TRUE(oldId != std::string(*fixture.users->getUser("alice")->id));
+    EXPECT_THROW_AS(fixture.service->refresh(old.refreshToken), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(fixture.service->authenticate(old.accessToken), errors::authentication::InvalidToken);
+    EXPECT_EQ(fixture.service->login("alice", "Replacement456").role, std::string("admin"));
+}
+
+TEST_CASE("auth: renaming and reusing a username cannot transfer its sessions")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto old = fixture.service->login("alice", "AlicePass123");
+    const std::string id = *fixture.users->getUser("alice")->id;
+    services::PatchUserInput patch;
+    patch.username = "alicia";
+    users.patchUser("alice", patch);
+    users.createUser({"alice", "Replacement456", "admin"});
+
+    EXPECT_EQ(std::string(*fixture.users->getUser("alicia")->id), id);
+    EXPECT_THROW_AS(fixture.service->refresh(old.refreshToken), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(fixture.service->authenticate(old.accessToken), errors::authentication::InvalidToken);
+    const auto fresh = fixture.service->login("alicia", "AlicePass123");
+    EXPECT_EQ(fixture.service->whoAmI(fixture.service->authenticate(fresh.accessToken)).username,
+              std::string("alicia"));
+}
+
+TEST_CASE("auth: role changes invalidate old access and refresh tokens without affecting other users")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "admin"});
+    users.createUser({"bobby", "BobPass123", "viewer"});
+    const auto old = fixture.service->login("alice", "AlicePass123");
+    const auto other = fixture.service->login("bobby", "BobPass123");
+    services::PatchUserInput patch;
+    patch.role = "viewer";
+    users.patchUser("alice", patch);
+
+    EXPECT_THROW_AS(fixture.service->authenticate(old.accessToken), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(fixture.service->refresh(old.refreshToken), errors::authentication::InvalidToken);
+    EXPECT_EQ(fixture.service->authenticate(other.accessToken).role, std::string("viewer"));
+    EXPECT_FALSE(fixture.service->refresh(other.refreshToken).accessToken.empty());
+    EXPECT_EQ(fixture.service->login("alice", "AlicePass123").role, std::string("viewer"));
+}
+
+TEST_CASE("auth: bulk deletion removes sessions while preserving the administrator session")
+{
+    AuthFixture fixture;
+    fixture.service->ensureSeeded("admin", kTestAdminPassword);
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto admin = fixture.service->login("admin", kTestAdminPassword);
+    const auto alice = fixture.service->login("alice", "AlicePass123");
+    EXPECT_EQ(users.deleteAllUsers().deletedCount, 1);
+
+    EXPECT_THROW_AS(fixture.tokens->getToken(alice.refreshToken), errors::database::RecordNotFound);
+    EXPECT_THROW_AS(fixture.service->refresh(alice.refreshToken), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(fixture.service->authenticate(alice.accessToken), errors::authentication::InvalidToken);
+    EXPECT_EQ(fixture.service->authenticate(admin.accessToken).role, std::string("admin"));
+    EXPECT_FALSE(fixture.service->refresh(admin.refreshToken).accessToken.empty());
+}
+
+TEST_CASE("auth: invalid and rolled back account changes preserve existing sessions")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto login = fixture.service->login("alice", "AlicePass123");
+    services::PatchUserInput patch;
+    patch.username = "alicia";
+    patch.role = "invalid";
+    EXPECT_THROW_AS(users.patchUser("alice", patch), errors::validation::InvalidValue);
+    EXPECT_TRUE(fixture.users->isUserExists("alice"));
+    EXPECT_FALSE(fixture.users->isUserExists("alicia"));
+
+    {
+        auto transaction = fixture.users->beginTransaction();
+        fixture.users->updatePassword("alice", auth::passwordHash("ChangedPass456"));
+        transaction.rollback();
+    }
+    EXPECT_EQ(fixture.service->authenticate(login.accessToken).role, std::string("viewer"));
+    EXPECT_FALSE(fixture.service->refresh(login.refreshToken).accessToken.empty());
+}
+
+TEST_CASE("auth: legacy access tokens without a session version are rejected")
+{
+    AuthFixture fixture;
+    fixture.service->ensureSeeded("admin", kTestAdminPassword);
+    const auto now = std::chrono::system_clock::now();
+    const auto token = jwt::create()
+                           .set_issuer("test-issuer")
+                           .set_subject("admin")
+                           .set_issued_at(now)
+                           .set_expires_at(now + std::chrono::hours(1))
+                           .set_payload_claim("role", jwt::claim(std::string("admin")))
+                           .sign(jwt::algorithm::hs256{kTestSecret});
+    EXPECT_THROW_AS(fixture.service->authenticate(token), errors::authentication::InvalidToken);
+}
+
+TEST_CASE("auth: concurrent refresh requests consume the token exactly once")
+{
+    TemporaryDatabaseFile file;
+    AuthFixture fixture(kTestSecret, file.path);
+    tests::seedUser(*fixture.users, "alice", "viewer", "AlicePass123");
+    const auto login = fixture.service->login("alice", "AlicePass123");
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::atomic<int> succeeded{0};
+    std::atomic<int> rejected{0};
+    std::exception_ptr firstError;
+    std::exception_ptr secondError;
+    auto work = [&](std::exception_ptr& error)
+    {
+        ready.wait();
+        try
+        {
+            fixture.service->refresh(login.refreshToken);
+            ++succeeded;
+        }
+        catch (const errors::authentication::InvalidToken&)
+        {
+            ++rejected;
+        }
+        catch (...)
+        {
+            error = std::current_exception();
+        }
+    };
+    application::ManagedThread first("refresh-first",
+                                     [&](const std::atomic<bool>&)
+                                     {
+                                         work(firstError);
+                                     });
+    application::ManagedThread second("refresh-second",
+                                      [&](const std::atomic<bool>&)
+                                      {
+                                          work(secondError);
+                                      });
+    first.start();
+    second.start();
+    start.set_value();
+    first.join();
+    second.join();
+    if (firstError)
+        std::rethrow_exception(firstError);
+    if (secondError)
+        std::rethrow_exception(secondError);
+    EXPECT_EQ(succeeded.load(), 1);
+    EXPECT_EQ(rejected.load(), 1);
+}
+
+TEST_CASE("auth: failed refresh replacement rolls back consumption of the original token")
+{
+    AuthFixture fixture;
+    tests::seedUser(*fixture.users, "alice", "viewer", "AlicePass123");
+    const auto login = fixture.service->login("alice", "AlicePass123");
+    if (fixture.db->backendName() == "POSTGRESQL")
+    {
+        fixture.db->executeVoid(
+            "CREATE FUNCTION reject_refresh_insert() RETURNS trigger LANGUAGE plpgsql "
+            "AS 'BEGIN RAISE EXCEPTION ''forced insert failure''; END';");
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_refresh_insert BEFORE INSERT ON refresh_tokens "
+            "FOR EACH ROW EXECUTE FUNCTION reject_refresh_insert();");
+    }
+    else
+    {
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_refresh_insert BEFORE INSERT ON refresh_tokens "
+            "BEGIN SELECT RAISE(ABORT, 'forced insert failure'); END;");
+    }
+    EXPECT_THROW_AS(fixture.service->refresh(login.refreshToken), errors::database::Conflict);
+    EXPECT_EQ(fixture.tokens->getToken(login.refreshToken)->revoked.getValue(-1), 0);
+    fixture.db->executeVoid(fixture.db->backendName() == "POSTGRESQL"
+                                ? "DROP TRIGGER reject_refresh_insert ON refresh_tokens;"
+                                : "DROP TRIGGER reject_refresh_insert;");
+    EXPECT_FALSE(fixture.service->refresh(login.refreshToken).accessToken.empty());
+}
+
+TEST_CASE("auth: sessions issued concurrently with a password change cannot survive it")
+{
+    TemporaryDatabaseFile file;
+    AuthFixture fixture(kTestSecret, file.path);
+    tests::seedUser(*fixture.users, "alice", "viewer", "AlicePass123");
+    services::UserService users(fixture.users);
+    const auto original = fixture.service->login("alice", "AlicePass123");
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    services::LoginResult rotated;
+    services::LoginResult loggedIn;
+    std::exception_ptr refreshError;
+    std::exception_ptr loginError;
+    application::ManagedThread refresh("refresh-race",
+                                       [&](const std::atomic<bool>&)
+                                       {
+                                           ready.wait();
+                                           try
+                                           {
+                                               rotated = fixture.service->refresh(original.refreshToken);
+                                           }
+                                           catch (const errors::authentication::InvalidToken&)
+                                           {
+                                           }
+                                           catch (...)
+                                           {
+                                               refreshError = std::current_exception();
+                                           }
+                                       });
+    application::ManagedThread login("login-race",
+                                     [&](const std::atomic<bool>&)
+                                     {
+                                         ready.wait();
+                                         try
+                                         {
+                                             loggedIn = fixture.service->login("alice", "AlicePass123");
+                                         }
+                                         catch (const errors::authentication::InvalidCredentials&)
+                                         {
+                                         }
+                                         catch (...)
+                                         {
+                                             loginError = std::current_exception();
+                                         }
+                                     });
+    refresh.start();
+    login.start();
+    start.set_value();
+    services::PatchUserInput patch;
+    patch.password = "ChangedPass456";
+    users.patchUser("alice", patch);
+    refresh.join();
+    login.join();
+    if (refreshError)
+        std::rethrow_exception(refreshError);
+    if (loginError)
+        std::rethrow_exception(loginError);
+    for (const auto& issued : {original, rotated, loggedIn})
+    {
+        if (!issued.accessToken.empty())
+        {
+            EXPECT_THROW_AS(fixture.service->authenticate(issued.accessToken), errors::authentication::InvalidToken);
+            EXPECT_THROW_AS(fixture.service->refresh(issued.refreshToken), errors::authentication::InvalidToken);
+        }
+    }
+    EXPECT_FALSE(fixture.service->login("alice", "ChangedPass456").accessToken.empty());
 }

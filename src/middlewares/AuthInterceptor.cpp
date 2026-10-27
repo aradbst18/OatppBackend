@@ -7,11 +7,12 @@
 namespace app::middlewares
 {
 
-AuthInterceptor::AuthInterceptor(std::shared_ptr<auth::JwtService> jwt) : jwt_(std::move(jwt))
+AuthInterceptor::AuthInterceptor(std::shared_ptr<services::AuthService> authService)
+    : authService_(std::move(authService))
 {
-    if (!jwt_)
+    if (!authService_)
     {
-        throw errors::internal::OperationFailed("AuthInterceptor requires JwtService");
+        throw errors::internal::OperationFailed("AuthInterceptor requires AuthService");
     }
 
     publicPaths_ = {
@@ -59,13 +60,14 @@ std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(
     // Throw domain exceptions and let `AppErrorHandler`
     // map them to 401 text/plain. No JSON envelope here.
     const std::string token = auth::JwtService::extractBearer(header);
-    const auth::TokenClaims claims = jwt_->verify(token);
+    const auth::TokenClaims claims = authService_->authenticate(token);
 
     // Stash verified claims in request bundle as a typed DTO.
     auto claimsDto = dto::AuthClaimsDto::createShared();
     claimsDto->subject = oatpp::String(claims.subject);
     claimsDto->role = oatpp::String(claims.role);
     claimsDto->issuer = oatpp::String(claims.issuer);
+    claimsDto->sessionVersion = claims.sessionVersion;
 
     request->putBundleData(kClaimsBundleKey, claimsDto);
     return nullptr;

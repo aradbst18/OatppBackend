@@ -9,6 +9,7 @@
 #include "app/errors/AppException.hpp"
 #include "app/infrastructure/database/DatabaseFactory.hpp"
 #include "app/infrastructure/database/OrmSupport.hpp"
+#include "app/repositories/RefreshTokenRepository.hpp"
 #include "app/repositories/UserRepository.hpp"
 
 #ifdef APP_DATABASE_SQLCIPHER
@@ -216,6 +217,97 @@ TEST_CASE("database: repository transactions commit and roll back")
     }
     EXPECT_EQ(repo.listUsers()->size(), 2);
     EXPECT_TRUE(!repo.isUserExists("carol"));
+}
+
+TEST_CASE("database: legacy account migration preserves credentials and discards unsafe sessions")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    db->executeVoid("CREATE TABLE users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, role TEXT NOT NULL);");
+    const std::string hash = auth::passwordHash("AlicePass123");
+    db->executeVoid("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?);", {"alice", hash, "admin"});
+    db->executeVoid(
+        "CREATE TABLE refresh_tokens (token TEXT PRIMARY KEY, username TEXT NOT NULL, "
+        "expires_at BIGINT NOT NULL, revoked INTEGER NOT NULL);");
+    db->executeVoid("INSERT INTO refresh_tokens VALUES ('legacy-token', 'alice', 4102444800, 0);");
+    repositories::UserRepository users(db);
+    repositories::RefreshTokenRepository tokens(db);
+    users.ensureSchema();
+    tokens.ensureSchema();
+    const auto migrated = users.getUser("alice");
+    EXPECT_FALSE(migrated->id->empty());
+    EXPECT_EQ(std::string(*migrated->passwordHash), hash);
+    EXPECT_EQ(std::string(*migrated->role), std::string("admin"));
+    EXPECT_EQ(migrated->sessionVersion.getValue(-1), 0);
+    EXPECT_THROW_AS(tokens.getToken("legacy-token"), errors::database::RecordNotFound);
+
+    auto token = repositories::RefreshTokenDto::createShared();
+    token->token = "new-token";
+    token->userId = migrated->id;
+    token->sessionVersion = migrated->sessionVersion;
+    token->expiresAt = v_int64{4102444800};
+    token->revoked = 0;
+    tokens.createToken(token);
+    users.ensureSchema();
+    tokens.ensureSchema();
+    EXPECT_EQ(std::string(*users.getUser("alice")->id), std::string(*migrated->id));
+    EXPECT_EQ(std::string(*tokens.getToken("new-token")->userId), std::string(*migrated->id));
+    users.deleteUser("alice");
+    EXPECT_THROW_AS(tokens.getToken("new-token"), errors::database::RecordNotFound);
+}
+
+TEST_CASE("database: transactions are isolated by owning database and reject nesting")
+{
+    auto firstDb = tests::createTestDatabase();
+    firstDb->open();
+    repositories::UserRepository first(firstDb);
+    first.ensureSchema();
+    auto secondDb = tests::createTestDatabase();
+    secondDb->open();
+    repositories::UserRepository second(secondDb);
+    second.ensureSchema();
+    {
+        auto firstTx = first.beginTransaction();
+        tests::seedUser(first, "alice", "viewer");
+        tests::seedUser(second, "bobby", "viewer");
+        EXPECT_THROW_AS(first.beginTransaction(), errors::database::TransactionFailed);
+        auto secondTx = second.beginTransaction();
+        tests::seedUser(second, "carol", "viewer");
+        firstTx.rollback();
+        secondTx.commit();
+    }
+    EXPECT_TRUE(first.listUsers()->empty());
+    EXPECT_EQ(second.listUsers()->size(), 2);
+    EXPECT_FALSE(first.isUserExists("bobby"));
+    EXPECT_TRUE(second.isUserExists("carol"));
+}
+
+TEST_CASE("database: failed legacy migration rolls back users and refresh tokens together")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    db->executeVoid("CREATE TABLE users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, role TEXT NOT NULL);");
+    const auto hash = auth::passwordHash("AlicePass123");
+    db->executeVoid("INSERT INTO users VALUES (?, ?, ?);", {"alice", hash, "viewer"});
+    db->executeVoid(
+        "CREATE TABLE refresh_tokens (token TEXT PRIMARY KEY, username TEXT NOT NULL, "
+        "expires_at BIGINT NOT NULL, revoked INTEGER NOT NULL);");
+    db->executeVoid("INSERT INTO refresh_tokens VALUES ('legacy-token', 'alice', 4102444800, 0);");
+    // An unknown external dependency prevents replacing the legacy table. The
+    // already executed refresh-table drop must be rolled back as well.
+    db->executeVoid("CREATE TABLE legacy_dependency (username TEXT REFERENCES users(username));");
+    db->executeVoid("INSERT INTO legacy_dependency VALUES ('alice');");
+    repositories::UserRepository users(db);
+    EXPECT_THROW_AS(users.ensureSchema(), errors::database::QueryFailed);
+    EXPECT_EQ(db->execute("SELECT password_hash FROM users WHERE username = 'alice';")[0][0], hash);
+    EXPECT_EQ(db->execute("SELECT token FROM refresh_tokens;")[0][0], std::string("legacy-token"));
+
+    db->executeVoid("DROP TABLE legacy_dependency;");
+    users.ensureSchema();
+    repositories::RefreshTokenRepository tokens(db);
+    tokens.ensureSchema();
+    EXPECT_FALSE(users.getUser("alice")->id->empty());
+    EXPECT_THROW_AS(tokens.getToken("legacy-token"), errors::database::RecordNotFound);
 }
 
 TEST_CASE("database: repository requires a database")

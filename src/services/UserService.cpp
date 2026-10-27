@@ -155,6 +155,8 @@ UserInfo UserService::updateUser(const std::string& currentUsername, const Updat
         throw errors::validation::InvalidValue("Invalid user role: '" + input.role + "'");
     }
 
+    auto transaction = users_->beginTransaction();
+    users_->lockUserByUsername(currentUsername);
     if (!users_->isUserExists(currentUsername))
     {
         throw errors::database::RecordNotFound("User '" + currentUsername + "' does not exist");
@@ -185,7 +187,9 @@ UserInfo UserService::updateUser(const std::string& currentUsername, const Updat
         users_->updateUser(userDto);
     }
 
-    return getUser(input.username);
+    const auto result = getUser(input.username);
+    transaction.commit();
+    return result;
 }
 
 UserInfo UserService::patchUser(const std::string& currentUsername, const PatchUserInput& input)
@@ -201,13 +205,6 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
             "At least one field (username, password, or role) must be provided for partial update");
     }
 
-    if (!users_->isUserExists(currentUsername))
-    {
-        throw errors::database::RecordNotFound("User '" + currentUsername + "' does not exist");
-    }
-
-    std::string targetUsername = currentUsername;
-
     if (input.username.has_value() && *input.username != currentUsername)
     {
         if (currentUsername == defaultAdminUsername_)
@@ -220,16 +217,9 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
             throw errors::validation::InvalidValue(
                 "Invalid username: must be 4-18 characters containing alphanumeric or @#$ characters");
         }
-
-        if (users_->isUserExists(*input.username))
-        {
-            throw errors::database::Conflict("Username '" + *input.username + "' already exists");
-        }
-
-        users_->updateUsername(currentUsername, *input.username);
-        targetUsername = *input.username;
     }
 
+    std::optional<std::string> passwordHash;
     if (input.password.has_value())
     {
         if (!validation::isValidPassword(*input.password))
@@ -238,8 +228,7 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
                 "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
         }
 
-        const std::string hash = auth::passwordHash(*input.password);
-        users_->updatePassword(targetUsername, hash);
+        passwordHash = auth::passwordHash(*input.password);
     }
 
     if (input.role.has_value())
@@ -249,11 +238,24 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
         {
             throw errors::validation::InvalidValue("Invalid user role: '" + *input.role + "'");
         }
-
-        users_->updateRole(targetUsername, *input.role);
     }
 
-    return getUser(targetUsername);
+    // Validate everything first, then write all fields and invalidate sessions
+    // in one statement. A failed PATCH cannot rename an account partially.
+    auto transaction = users_->beginTransaction();
+    users_->lockUserByUsername(currentUsername);
+    const auto current = users_->getUser(currentUsername);
+    const std::string targetUsername = input.username.value_or(currentUsername);
+    if (targetUsername != currentUsername && users_->isUserExists(targetUsername))
+    {
+        throw errors::database::Conflict("Username '" + targetUsername + "' already exists");
+    }
+    users_->updateUserWithNewUsername(currentUsername, targetUsername,
+                                      passwordHash ? oatpp::String(*passwordHash) : current->passwordHash,
+                                      input.role ? oatpp::String(*input.role) : current->role);
+    const auto result = getUser(targetUsername);
+    transaction.commit();
+    return result;
 }
 
 void UserService::deleteUser(const std::string& username)

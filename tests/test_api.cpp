@@ -20,6 +20,7 @@
 
 #include "app/application/Application.hpp"
 #include "app/config/AppSettings.hpp"
+#include "app/controllers/AuthController.hpp"
 #include "app/controllers/UserController.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/errors/ErrorMapper.hpp"
@@ -349,7 +350,10 @@ TEST_CASE("api: who-am-i preserves special characters in claims without delimite
     auto srv = startServer();
 
     auth::JwtService jwt("test-secret-123456789012345678901234", "test-issuer", std::chrono::seconds(3600));
-    const std::string token = jwt.create("user|with|pipes", "viewer");
+    repositories::UserRepository users(srv->app->database());
+    tests::seedUser(users, "user|with|pipes", "viewer");
+    const auto account = users.getUser("user|with|pipes");
+    const std::string token = jwt.create(*account->id, "viewer", account->sessionVersion.getValue(-1));
     const std::string req =
         "GET /auth/who-am-i HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token + "\r\nConnection: close\r\n\r\n";
 
@@ -361,9 +365,8 @@ TEST_CASE("api: who-am-i preserves special characters in claims without delimite
 
 TEST_CASE("api: interceptor public/private classification")
 {
-    auto jwt = std::make_shared<auth::JwtService>("test-secret-123456789012345678901234", "test-issuer",
-                                                  std::chrono::seconds(3600));
-    middlewares::AuthInterceptor interceptor(jwt);
+    auto srv = startServer();
+    middlewares::AuthInterceptor interceptor(srv->app->authService());
 
     EXPECT_TRUE(interceptor.isPublicPath("POST", "/auth/login"));
 
@@ -572,12 +575,13 @@ std::string userManagementRequest(int port, const std::string& method, const std
                              "\r\nConnection: close\r\n\r\n" + body);
 }
 
-std::string tokenWithRole(const std::optional<std::string>& role)
+std::string tokenWithRole(const std::optional<std::string>& role, const auth::TokenClaims& account)
 {
     const auto now = std::chrono::system_clock::now();
     auto builder = jwt::create()
                        .set_issuer("test-issuer")
-                       .set_subject("admin")
+                       .set_subject(account.subject)
+                       .set_payload_claim("session_version", jwt::claim(picojson::value(account.sessionVersion)))
                        .set_issued_at(now)
                        .set_expires_at(now + std::chrono::hours(1));
     if (role)
@@ -638,6 +642,7 @@ TEST_CASE("api: users allow viewer and operator reads but reject every write wit
 TEST_CASE("api: users reject missing empty and unknown token roles with 403")
 {
     auto srv = startServer();
+    const auto account = srv->app->authService()->authenticate(getAdminToken(srv->port));
     auto database = srv->app->database();
     const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
     const std::vector<std::optional<std::string>> roles = {std::nullopt, "",       "superuser",
@@ -645,7 +650,7 @@ TEST_CASE("api: users reject missing empty and unknown token roles with 403")
 
     for (const auto& role : roles)
     {
-        const auto token = tokenWithRole(role);
+        const auto token = tokenWithRole(role, account);
         EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", token)), 403);
         EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users/admin", token)), 403);
         for (const auto& request : userManagementWrites("admin"))
@@ -683,7 +688,8 @@ TEST_CASE("api: users controller enforces roles when the authentication intercep
 {
     auto srv = startServer();
     controllers::UserController controller(serialization::createAppObjectMapper(), srv->app->userService(),
-                                           srv->app->jwtService());
+                                           srv->app->authService());
+    const auto account = srv->app->authService()->authenticate(getAdminToken(srv->port));
     auto database = srv->app->database();
     const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
     auto patch = dto::PatchUserDto::createShared();
@@ -693,7 +699,7 @@ TEST_CASE("api: users controller enforces roles when the authentication intercep
     for (const auto& role : roles)
     {
         oatpp::web::protocol::http::Headers headers;
-        headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole(role)));
+        headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole(role, account)));
         const auto request =
             controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
 
@@ -712,11 +718,40 @@ TEST_CASE("api: users controller enforces roles when the authentication intercep
     }
 
     oatpp::web::protocol::http::Headers headers;
-    headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole("admin")));
+    headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole("admin", account)));
     const auto request =
         controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
     EXPECT_EQ(controller.patchUser("admin", patch, request)->getStatus().code, 200);
     EXPECT_FALSE(srv->app->authService()->login("admin", "Changed1234").accessToken.empty());
+}
+
+TEST_CASE("api: invalidated sessions fail in middleware and controller fallback paths")
+{
+    auto srv = startServer();
+    const auto users = srv->app->userService();
+    const auto authService = srv->app->authService();
+    users->createUser({"alice", "AlicePass123", "admin"});
+    const auto login = authService->login("alice", "AlicePass123");
+    const auto mapper = serialization::createAppObjectMapper();
+    controllers::UserController userController(mapper, users, authService);
+    controllers::AuthController authController(mapper, authService, srv->app->jwtService());
+    oatpp::web::protocol::http::Headers headers;
+    headers.put("Authorization", oatpp::String("Bearer " + login.accessToken));
+    const auto request =
+        controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
+    EXPECT_EQ(userController.listUsers(request)->getStatus().code, 200);
+    EXPECT_EQ(authController.whoAmI(request)->getStatus().code, 200);
+
+    services::PatchUserInput patch;
+    patch.password = "ChangedPass456";
+    users->patchUser("alice", patch);
+    EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", login.accessToken)), 401);
+    EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/auth/who-am-i", login.accessToken)), 401);
+    EXPECT_EQ(statusOf(userManagementRequest(srv->port, "POST", "/auth/refresh", "",
+                                             "{\"refresh_token\":\"" + login.refreshToken + "\"}")),
+              401);
+    EXPECT_THROW_AS(userController.listUsers(request), errors::authentication::InvalidToken);
+    EXPECT_THROW_AS(authController.whoAmI(request), errors::authentication::InvalidToken);
 }
 
 TEST_CASE("api: users get - list and single user")

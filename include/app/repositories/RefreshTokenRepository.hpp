@@ -23,7 +23,7 @@ class RefreshTokenRepository : public BaseRepository
 public:
     explicit RefreshTokenRepository(std::shared_ptr<infrastructure::database::IDatabase> db);
 
-    /// Creates the `refresh_tokens` table if missing.
+    /// Creates the account-bound token schema, discarding legacy username tokens.
     void ensureSchema();
 
     /// Stores a new refresh token. Throws Conflict if token already exists.
@@ -35,8 +35,8 @@ public:
     /// Marks a specific refresh token as revoked. Missing token is a no-op.
     void revokeToken(const oatpp::String& token);
 
-    /// Revokes all active refresh tokens for a user.
-    void revokeAllForUser(const oatpp::String& username);
+    /// Revokes all refresh tokens for an immutable account ID.
+    void revokeAllForUser(const oatpp::String& userId);
 
     /// Deletes all expired tokens prior to `nowTimestamp`.
     void deleteExpired(oatpp::Int64 nowTimestamp);
@@ -44,24 +44,28 @@ public:
 private:
     static void checkToken(const oatpp::Object<RefreshTokenDto>& token);
 
-    QUERY(createTableImp,
-          "CREATE TABLE IF NOT EXISTS " + tableName() +
-              " (token TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at BIGINT NOT NULL, revoked INTEGER NOT NULL)")
+    QUERY(createTableImp, "CREATE TABLE IF NOT EXISTS " + tableName() +
+                              " (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                              "session_version BIGINT NOT NULL CHECK (session_version >= 0), "
+                              "expires_at BIGINT NOT NULL, revoked INTEGER NOT NULL)")
+
+    QUERY(createUserIndexImp, "CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON refresh_tokens(user_id);")
 
     QUERY(insertTokenImp,
           "INSERT INTO " + tableName() +
-              " (token, username, expires_at, revoked) VALUES (:token.token, :token.username, "
-              ":token.expires_at, :token.revoked);",
+              " (token, user_id, session_version, expires_at, revoked) VALUES (:token.token, :token.user_id, "
+              ":token.session_version, :token.expires_at, :token.revoked);",
           PARAM(oatpp::Object<RefreshTokenDto>, token))
 
-    QUERY(findTokenImp, "SELECT token, username, expires_at, revoked FROM " + tableName() + " WHERE token = :token;",
+    QUERY(findTokenImp,
+          "SELECT token, user_id, session_version, expires_at, revoked FROM " + tableName() + " WHERE token = :token;",
           PARAM(oatpp::String, token))
 
     QUERY(revokeTokenImp, "UPDATE " + tableName() + " SET revoked = 1 WHERE token = :token;",
           PARAM(oatpp::String, token))
 
-    QUERY(revokeAllForUserImp, "UPDATE " + tableName() + " SET revoked = 1 WHERE username = :username;",
-          PARAM(oatpp::String, username))
+    QUERY(revokeAllForUserImp, "UPDATE " + tableName() + " SET revoked = 1 WHERE user_id = :userId;",
+          PARAM(oatpp::String, userId))
 
     QUERY(deleteExpiredImp, "DELETE FROM " + tableName() + " WHERE expires_at < :now;", PARAM(oatpp::Int64, now))
 };

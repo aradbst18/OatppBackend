@@ -16,7 +16,8 @@ class RefreshTokenDto : public oatpp::DTO
     DTO_INIT(RefreshTokenDto, DTO /* Extends */)
 
     DTO_FIELD(oatpp::String, token);
-    DTO_FIELD(oatpp::String, username);
+    DTO_FIELD(oatpp::String, userId, "user_id");
+    DTO_FIELD(oatpp::Int64, sessionVersion, "session_version");
     DTO_FIELD(oatpp::Int64, expiresAt, "expires_at");
     DTO_FIELD(oatpp::Int32, revoked);
 };

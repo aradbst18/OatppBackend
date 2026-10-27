@@ -23,6 +23,10 @@ AuthService::AuthService(std::shared_ptr<repositories::UserRepository> users, st
     {
         throw errors::internal::OperationFailed("AuthService requires user repository and JWT service");
     }
+    if (refreshTokens_ && !users_->sharesDatabaseWith(*refreshTokens_))
+    {
+        throw errors::internal::OperationFailed("Account and refresh token repositories must share a database");
+    }
 }
 
 std::string AuthService::ensureSeeded(const std::string& customUsername, const std::string& customPassword)
@@ -117,6 +121,8 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
         throw errors::validation::InvalidValue("Invalid password: 6-48 chars with a letter and a digit");
     }
 
+    auto transaction = users_->beginTransaction();
+    users_->lockUserByUsername(username);
     oatpp::Object<repositories::UserDto> record;
     try
     {
@@ -138,7 +144,7 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
     LoginResult result;
     result.username = *record->username;
     result.role = *record->role;
-    result.accessToken = jwt_->create(result.username, result.role);
+    result.accessToken = jwt_->create(*record->id, result.role, record->sessionVersion.getValue(-1));
     result.expiresInSeconds = jwt_->ttl().count();
 
     if (refreshTokens_)
@@ -149,7 +155,8 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
 
         auto tokenRecord = repositories::RefreshTokenDto::createShared();
         tokenRecord->token = oatpp::String(refreshToken);
-        tokenRecord->username = record->username;
+        tokenRecord->userId = record->id;
+        tokenRecord->sessionVersion = record->sessionVersion;
         tokenRecord->expiresAt = nowSeconds + refreshTtl_.count();
         tokenRecord->revoked = 0;
 
@@ -157,6 +164,7 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
         result.refreshToken = refreshToken;
     }
 
+    transaction.commit();
     logging::logInfo("auth", "Login succeeded for user '" + username + "'");
     return result;
 }
@@ -173,6 +181,7 @@ LoginResult AuthService::refresh(const std::string& refreshToken)
         throw errors::internal::OperationFailed("Refresh token store is not configured");
     }
 
+    auto transaction = users_->beginTransaction();
     oatpp::Object<repositories::RefreshTokenDto> record;
     try
     {
@@ -183,9 +192,21 @@ LoginResult AuthService::refresh(const std::string& refreshToken)
         throw errors::authentication::InvalidToken("Invalid refresh token");
     }
 
-    if (!record || !record->username || !record->expiresAt)
+    if (!record || !record->userId || !record->sessionVersion || !record->expiresAt)
     {
         throw errors::authentication::InvalidToken("Malformed refresh token record");
+    }
+
+    // PostgreSQL locks this account row; SQLCipher starts a write transaction.
+    // Re-read after acquiring the lock so concurrent rotations cannot both win.
+    users_->lockUserById(record->userId);
+    try
+    {
+        record = refreshTokens_->getToken(oatpp::String(refreshToken));
+    }
+    catch (const errors::database::RecordNotFound&)
+    {
+        throw errors::authentication::InvalidToken("Invalid refresh token");
     }
 
     if (record->revoked && record->revoked.getValue(0) != 0)
@@ -195,29 +216,34 @@ LoginResult AuthService::refresh(const std::string& refreshToken)
 
     const auto now = std::chrono::system_clock::now();
     const auto nowSeconds = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-    if (record->expiresAt.getValue(0) < nowSeconds)
+    if (record->expiresAt.getValue(0) <= nowSeconds)
     {
         throw errors::authentication::TokenExpired("Refresh token has expired");
     }
-
-    // Refresh token rotation: revoke old token immediately.
-    refreshTokens_->revokeToken(oatpp::String(refreshToken));
 
     // Verify user still exists in database and fetch up-to-date role.
     oatpp::Object<repositories::UserDto> userRecord;
     try
     {
-        userRecord = users_->getUser(record->username);
+        userRecord = users_->getUserById(record->userId);
     }
     catch (const errors::database::RecordNotFound&)
     {
         throw errors::authentication::InvalidToken("User for refresh token no longer exists");
     }
 
+    if (record->sessionVersion.getValue(-1) != userRecord->sessionVersion.getValue(-2))
+    {
+        throw errors::authentication::InvalidToken("Account sessions have been invalidated");
+    }
+
+    // Both revocation and replacement roll back if any later step fails.
+    refreshTokens_->revokeToken(oatpp::String(refreshToken));
+
     LoginResult result;
     result.username = *userRecord->username;
     result.role = *userRecord->role;
-    result.accessToken = jwt_->create(result.username, result.role);
+    result.accessToken = jwt_->create(*userRecord->id, result.role, userRecord->sessionVersion.getValue(-1));
     result.expiresInSeconds = jwt_->ttl().count();
 
     // Issue rotated new refresh token.
@@ -225,13 +251,15 @@ LoginResult AuthService::refresh(const std::string& refreshToken)
 
     auto newRecord = repositories::RefreshTokenDto::createShared();
     newRecord->token = oatpp::String(newRefreshToken);
-    newRecord->username = userRecord->username;
+    newRecord->userId = userRecord->id;
+    newRecord->sessionVersion = userRecord->sessionVersion;
     newRecord->expiresAt = nowSeconds + refreshTtl_.count();
     newRecord->revoked = 0;
 
     refreshTokens_->createToken(newRecord);
     result.refreshToken = newRefreshToken;
 
+    transaction.commit();
     logging::logInfo("auth", "Token refreshed for user '" + result.username + "'");
     return result;
 }
@@ -243,11 +271,33 @@ std::string AuthService::generateRefreshToken() const
 
 LoginResult AuthService::whoAmI(const auth::TokenClaims& claims)
 {
+    oatpp::Object<repositories::UserDto> account;
+    try
+    {
+        account = users_->getUserById(claims.subject);
+    }
+    catch (const errors::database::RecordNotFound&)
+    {
+        throw errors::authentication::InvalidToken("Account no longer exists");
+    }
+    if (claims.sessionVersion < 0 || claims.sessionVersion != account->sessionVersion.getValue(-1))
+    {
+        throw errors::authentication::InvalidToken("Account sessions have been invalidated");
+    }
     LoginResult result;
-    result.username = claims.subject;
-    result.role = claims.role.empty() ? domain::toString(domain::UserRole::Viewer) : claims.role;
+    result.username = *account->username;
+    result.role = *account->role;
     result.expiresInSeconds = 0;
     return result;
+}
+
+auth::TokenClaims AuthService::authenticate(const std::string& accessToken)
+{
+    auto claims = jwt_->verify(accessToken);
+    // Authorization keeps using the signed role, whose lifetime is bounded by
+    // session_version. Every role write increments that version atomically.
+    whoAmI(claims);
+    return claims;
 }
 
 }  // namespace app::services

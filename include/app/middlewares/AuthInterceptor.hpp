@@ -7,6 +7,7 @@
 #include "oatpp/web/server/interceptor/RequestInterceptor.hpp"
 
 #include "app/auth/JwtService.hpp"
+#include "app/services/AuthService.hpp"
 
 namespace app::middlewares
 {
@@ -25,14 +26,14 @@ constexpr const char* kClaimsBundleKey = "app.auth.claims";
 class AuthInterceptor : public oatpp::web::server::interceptor::RequestInterceptor
 {
 public:
-    explicit AuthInterceptor(std::shared_ptr<auth::JwtService> jwt);
+    explicit AuthInterceptor(std::shared_ptr<services::AuthService> authService);
 
     std::shared_ptr<OutgoingResponse> intercept(const std::shared_ptr<IncomingRequest>& request) override;
 
     bool isPublicPath(const std::string& method, const std::string& path) const;
 
 private:
-    std::shared_ptr<auth::JwtService> jwt_;
+    std::shared_ptr<services::AuthService> authService_;
     std::unordered_set<std::string> publicPaths_;
 };
 

@@ -247,7 +247,7 @@ void Application::initRouting()
     websocketHandler_ = wsHandler;
 
     auto authController = std::make_shared<controllers::AuthController>(objectMapper, auth_, jwt_);
-    auto userController = std::make_shared<controllers::UserController>(objectMapper, userService_, jwt_);
+    auto userController = std::make_shared<controllers::UserController>(objectMapper, userService_, auth_);
     auto echoController = std::make_shared<controllers::EchoController>(objectMapper, websocketHandler_);
 
     router_->addController(authController);
@@ -287,7 +287,7 @@ void Application::initRouting()
     httpHandler_->addResponseInterceptor(cors);
 
     httpHandler_->addRequestInterceptor(std::make_shared<middlewares::RateLimitInterceptor>());
-    httpHandler_->addRequestInterceptor(std::make_shared<middlewares::AuthInterceptor>(jwt_));
+    httpHandler_->addRequestInterceptor(std::make_shared<middlewares::AuthInterceptor>(auth_));
 
     // Connection provider is created here but the blocking Server runs in run().
     connectionProvider_ = oatpp::network::tcp::server::ConnectionProvider::createShared(

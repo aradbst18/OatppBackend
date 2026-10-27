@@ -40,6 +40,9 @@ class BaseRepository : public oatpp::orm::DbClient
 public:
     virtual ~BaseRepository() = default;
 
+    /// Repositories in a single transaction must share the same database.
+    bool sharesDatabaseWith(const BaseRepository& other) const noexcept;
+
 protected:
     BaseRepository(std::shared_ptr<infrastructure::database::IDatabase> db, std::string tableName);
 
@@ -51,6 +54,9 @@ protected:
 
     /// True when the table exists in the active backend's catalog.
     bool tableExists();
+
+    /// Startup-time column probe for versioned schema upgrades.
+    bool columnExists(const std::string& column);
 
     /// Typed rows of a statement that executed successfully. Covers the fetch
     /// stage itself (SQLite step errors, adapter/mapper type mismatches on
@@ -86,6 +92,14 @@ private:
           PARAM(oatpp::String, name))
 
     QUERY(postgresqlTableExistsImp, "SELECT count(*) AS count FROM information_schema.tables WHERE table_name = :name;",
+          PARAM(oatpp::String, name))
+
+    QUERY(sqlcipherColumnsImp, "SELECT name FROM pragma_table_info(:name);", PARAM(oatpp::String, name))
+
+    QUERY(postgresqlColumnsImp,
+          "SELECT cast(column_name AS text) AS name FROM information_schema.columns WHERE table_schema = "
+          "current_schema() "
+          "AND table_name = :name;",
           PARAM(oatpp::String, name))
 
     std::shared_ptr<infrastructure::database::IDatabase> db_;

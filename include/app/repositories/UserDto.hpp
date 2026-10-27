@@ -21,9 +21,11 @@ class UserDto : public oatpp::DTO
 {
     DTO_INIT(UserDto, DTO /* Extends */)
 
+    DTO_FIELD(oatpp::String, id);
     DTO_FIELD(oatpp::String, username);
     DTO_FIELD(oatpp::String, passwordHash, "password_hash");
     DTO_FIELD(oatpp::String, role);
+    DTO_FIELD(oatpp::Int64, sessionVersion, "session_version");
 };
 
 }  // namespace app::repositories

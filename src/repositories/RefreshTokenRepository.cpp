@@ -26,9 +26,11 @@ void RefreshTokenRepository::checkToken(const oatpp::Object<RefreshTokenDto>& to
         throw errors::validation::InvalidValue("refresh token is required");
     }
 
-    if (!token->token || token->token->empty() || !token->username || token->username->empty())
+    if (!token->token || token->token->empty() || !token->userId || token->userId->empty() || !token->sessionVersion ||
+        token->sessionVersion.getValue(-1) < 0)
     {
-        throw errors::validation::InvalidValue("refresh token fields (token, username) must not be empty");
+        throw errors::validation::InvalidValue(
+            "refresh token requires token, user_id and a nonnegative session_version");
     }
 
     if (!token->expiresAt || token->expiresAt.getValue(0) <= 0)
@@ -39,11 +41,18 @@ void RefreshTokenRepository::checkToken(const oatpp::Object<RefreshTokenDto>& to
 
 void RefreshTokenRepository::ensureSchema()
 {
+    auto transaction = beginTransaction();
+    if (tableExists() && !columnExists("user_id"))
+    {
+        executeQuery("DROP TABLE refresh_tokens;", {});
+    }
     createTableImp();
+    createUserIndexImp();
     if (!tableExists())
     {
         throw errors::database::QueryFailed(tableName() + " table is missing after CREATE TABLE IF NOT EXISTS");
     }
+    transaction.commit();
 }
 
 void RefreshTokenRepository::createToken(const oatpp::Object<RefreshTokenDto>& token)
@@ -86,11 +95,11 @@ void RefreshTokenRepository::revokeToken(const oatpp::String& token)
     }
 }
 
-void RefreshTokenRepository::revokeAllForUser(const oatpp::String& username)
+void RefreshTokenRepository::revokeAllForUser(const oatpp::String& userId)
 {
-    if (username && !username->empty())
+    if (userId && !userId->empty())
     {
-        revokeAllForUserImp(username);
+        revokeAllForUserImp(userId);
     }
 }
 

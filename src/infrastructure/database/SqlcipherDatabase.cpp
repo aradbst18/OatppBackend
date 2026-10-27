@@ -62,6 +62,15 @@ public:
             validateKey(handle);
         }
 
+        // Cascading account deletion must be enforced on every pooled handle.
+        int foreignKeysEnabled = 0;
+        if (sqlite3_exec(handle, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr) != SQLITE_OK ||
+            sqlite3_db_config(handle, SQLITE_DBCONFIG_ENABLE_FKEY, -1, &foreignKeysEnabled) != SQLITE_OK ||
+            foreignKeysEnabled != 1)
+        {
+            throw std::runtime_error("failed to enable foreign key enforcement");
+        }
+
         return connection;
     }
 

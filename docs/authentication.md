@@ -3,11 +3,57 @@
 ## Overview
 
 - `JwtService` (`app/auth/`) is the only crypto owner: HS256 via jwt-cpp,
-  claims `{iss, sub, role, iat, exp}`, 30s clock-skew leeway, issuer enforced.
+  claims `{iss, sub, role, session_version, iat, exp}`, 30s clock-skew leeway,
+  issuer enforced. `sub` is a permanent account ID, not a username.
 - `AuthService` checks credentials from `UserRepository` and issues tokens.
   `ensureSeeded()` provisions an administrator using explicit private credentials
   and returns the effective username for account protection in `UserService`.
 - `AuthInterceptor` enforces authentication per request.
+
+## Account identity and session lifetime
+
+Each account receives a random 128-bit ID at creation. Renaming preserves that
+ID; deleting and recreating a username creates a different ID. Refresh tokens
+reference `users.id` through a foreign key with cascading deletion. SQLCipher
+enables and verifies foreign-key enforcement for every pooled connection.
+
+Every password, role, or username update increments `users.session_version` in
+the same SQL statement as the account change. Existing refresh tokens and
+access JWTs retain their issuance version and are rejected after the change.
+This signs out all sessions, including the caller's own session. Deleting an
+account removes its refresh tokens and causes access-token authentication to
+fail. Bulk deletion preserves the protected administrator and its sessions.
+Version-based invalidation is authoritative; old refresh rows need not have
+their `revoked` flag changed to become unusable.
+
+`AuthService::authenticate()` verifies the JWT cryptographically, then checks
+that its account still exists and that its session version matches. Middleware
+and controller fallback paths both use this method. `JwtService::verify()`
+alone validates token structure and cryptography, not current account state.
+`whoAmI()` resolves the username from the account record rather than from `sub`.
+
+Login and refresh issue tokens inside a database transaction coordinated with
+account writes. PostgreSQL locks the account row; SQLCipher uses
+`BEGIN IMMEDIATE`. Refresh rechecks token state after obtaining the account
+lock. Consuming the old token and storing its successor commit together, so
+concurrent refreshes have one winner and an insertion failure leaves the
+original token usable.
+
+### Upgrading existing databases
+
+Back up the database and stop older application instances before upgrading.
+At startup, the account schema upgrade preserves usernames, password hashes,
+and roles, assigns permanent IDs, and initializes session versions. The
+upgrade rebuilds the application's users table transactionally and discards
+all legacy username-bound refresh tokens; their historical owners cannot be
+reconstructed safely. An upgrade failure rolls back the account migration.
+Subsequent startups preserve the new IDs and sessions.
+
+All users must sign in again after upgrading. Legacy access JWTs without a
+session version are rejected immediately, even if their signatures and expiry
+are valid. Do not run older application versions against the upgraded schema.
+Any external consumer that treated JWT `sub` as a username must use the
+username returned by login or `/auth/who-am-i` instead.
 
 ## Administrator provisioning
 
@@ -50,8 +96,15 @@ Validation failures -> 422; bad credentials -> 401 (unknown user and wrong
 password are indistinguishable); success -> 200:
 
 ```json
-{"access_token":"<jwt>","token_type":"Bearer","username":"admin","role":"admin","expires_in":3600}
+{"access_token":"<jwt>","refresh_token":"<opaque-token>","token_type":"Bearer","username":"admin","role":"admin","expires_in":3600}
 ```
+
+### POST /auth/refresh (public)
+
+Request: `{"refresh_token":"<opaque-token>"}`. Success returns the login
+response shape with a new access token and a replacement refresh token.
+The previous refresh token cannot be reused. Expired, revoked, deleted-account,
+or outdated-session tokens return 401; an empty token returns 400.
 
 ### GET /auth/who-am-i (authenticated)
 
@@ -66,15 +119,15 @@ Requires `Authorization: Bearer <jwt>`. Missing/malformed/expired/invalid ->
 
 `AuthInterceptor::intercept`:
 
-1. Public path (`POST /auth/login`, `GET /ws/echo`, `/swagger/*`,
+1. Public path (`POST /auth/login`, `POST /auth/refresh`, `GET /ws/echo`, `/swagger/*`,
    `/api-docs/*`) -> return `nullptr` (continue).
-2. Else extract `Bearer` token -> `JwtService::verify` -> stash
+2. Else extract `Bearer` token -> `AuthService::authenticate` -> stash
    `dto::AuthClaimsDto` in the request bundle under
    `middlewares::kClaimsBundleKey` -> `nullptr`.
 3. Any failure throws `authentication::*` (`MissingCredentials` / `InvalidToken` /
    `TokenExpired`); `AppErrorHandler` maps it to `401 text/plain` (never throws past oatpp).
 
-Controllers re-verify the header directly when the bundle is absent, so the
+Controllers authenticate the header directly when the bundle is absent, so the
 endpoint fails closed even if the interceptor is skipped.
 
 ## Error handling
@@ -94,4 +147,5 @@ Invalid credentials
 - Secrets (JWT secret, DB key, passwords, raw tokens) are never logged.
 - Hash comparison failure shape is constant (no user enumeration).
 - Token TTL is configurable (`jwtTtlSeconds`); expiry is enforced on every
-  verification. Changing the secret invalidates all tokens.
+  verification. Changing the JWT secret invalidates access JWTs; refresh
+  tokens must also be invalidated through account/session state.

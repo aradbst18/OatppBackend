@@ -82,6 +82,7 @@ class AuthClaimsDto : public oatpp::DTO
     DTO_FIELD(String, subject);
     DTO_FIELD(String, role);
     DTO_FIELD(String, issuer);
+    DTO_FIELD(Int64, sessionVersion, "session_version");
 };
 
 }  // namespace app::dto

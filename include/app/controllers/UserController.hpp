@@ -9,6 +9,7 @@
 #include "app/auth/JwtService.hpp"
 #include "app/domain/UserRole.hpp"
 #include "app/dto/UserDtos.hpp"
+#include "app/services/AuthService.hpp"
 #include "app/services/UserService.hpp"
 
 #include OATPP_CODEGEN_BEGIN(ApiController)
@@ -33,7 +34,8 @@ class UserController : public oatpp::web::server::api::ApiController
 {
 public:
     UserController(const std::shared_ptr<ObjectMapper>& objectMapper,
-                   std::shared_ptr<services::UserService> userService, std::shared_ptr<auth::JwtService> jwtService);
+                   std::shared_ptr<services::UserService> userService,
+                   std::shared_ptr<services::AuthService> authService);
 
 #if defined(APP_WITH_SWAGGER)
     ENDPOINT_INFO(listUsers);
@@ -72,7 +74,7 @@ private:
     void requireAdmin(const std::shared_ptr<IncomingRequest>& request);
 
     std::shared_ptr<services::UserService> userService_;
-    std::shared_ptr<auth::JwtService> jwtService_;
+    std::shared_ptr<services::AuthService> authService_;
 };
 
 }  // namespace app::controllers

@@ -264,6 +264,7 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(
         std::string subject;
         std::string role;
         std::string issuer;
+        std::int64_t sessionVersion = -1;
 
         try
         {
@@ -274,6 +275,7 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(
                 subject = *bundled->subject;
                 role = bundled->role ? *bundled->role : "";
                 issuer = bundled->issuer ? *bundled->issuer : "";
+                sessionVersion = bundled->sessionVersion.getValue(-1);
             }
         }
         catch (...)
@@ -289,12 +291,13 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(
             claims.subject = std::move(subject);
             claims.role = std::move(role);
             claims.issuer = issuer.empty() ? jwtService_->issuer() : std::move(issuer);
+            claims.sessionVersion = sessionVersion;
         }
         else
         {
             const auto header = request->getHeader("Authorization");
             const std::string value = header ? header->c_str() : "";
-            claims = jwtService_->verify(auth::JwtService::extractBearer(value));
+            claims = authService_->authenticate(auth::JwtService::extractBearer(value));
         }
 
         const services::LoginResult result = authService_->whoAmI(claims);

@@ -15,16 +15,17 @@ class IDatabase;
  * Both oatpp adapters were built for the ORM: `oatpp::orm::DbClient`
  * subclasses declare statements with the `QUERY` macro (named `:param`
  * templates, typed DTO results) and run them through an `oatpp::orm::Executor`.
- * This class is that executor, adapting one mutex-guarded IDatabase:
+ * This class is that executor, adapting one pooled IDatabase:
  *
  * - template parsing and type/result mapping stay in the active backend
  *   adapter's executor, so `:param` syntax and row mapping are exactly the
  *   adapter's (SQLite or PostgreSQL) — nothing is re-implemented here;
- * - every statement executes through IDatabase::executeOrm(): database mutex
- *   held, on the open handle. Repositories never pass a connection, so two
- *   threads can never run statements on the same handle concurrently;
- * - transaction control (begin/commit/rollback) is BEGIN/COMMIT/ROLLBACK run
- *   through that same path, so `oatpp::orm::Transaction` works unchanged;
+ * - statements outside a transaction borrow their own pooled connection;
+ * - a thread-local context keyed by this executor binds repository calls to
+ *   the owning transaction. Other databases in the same thread stay isolated;
+ * - nested transactions on the same executor are rejected;
+ * - PostgreSQL uses BEGIN; SQLCipher uses BEGIN IMMEDIATE to serialize writers
+ *   before reading account state. Commit/rollback use the owning connection;
  * - schema-version helpers delegate to the backend adapter with the open
  *   connection (startup-time schema tooling; this application does not use
  *   SchemaMigration).
@@ -42,8 +43,7 @@ public:
     /// Type resolver of the active backend adapter.
     std::shared_ptr<oatpp::data::mapping::TypeResolver> createTypeResolver() override;
 
-    /// The open handle of the adapted database (throws ConnectionFailed when it
-    /// is closed).
+    /// Active transaction handle, or a new pooled handle outside a transaction.
     oatpp::provider::ResourceHandle<oatpp::orm::Connection> getConnection() override;
 
     /// Template parsing of the active backend adapter.
@@ -51,14 +51,13 @@ public:
                                                           const ParamsTypeMap& paramsTypeMap,
                                                           bool prepare = false) override;
 
-    /// Runs the statement through IDatabase::executeOrm() (locked, on the open
-    /// handle unless `connection` overrides it).
+    /// Uses the owning transaction, explicit connection, or a pooled connection.
     std::shared_ptr<oatpp::orm::QueryResult> execute(
         const StringTemplate& queryTemplate, const std::unordered_map<oatpp::String, oatpp::Void>& params,
         const std::shared_ptr<const oatpp::data::mapping::TypeResolver>& typeResolver = nullptr,
         const oatpp::provider::ResourceHandle<oatpp::orm::Connection>& connection = nullptr) override;
 
-    /// BEGIN on the open handle.
+    /// Begin on a pooled connection; SQLCipher acquires its writer lock eagerly.
     std::shared_ptr<oatpp::orm::QueryResult> begin(
         const oatpp::provider::ResourceHandle<oatpp::orm::Connection>& connection = nullptr) override;
 
@@ -82,8 +81,7 @@ public:
 private:
     std::shared_ptr<oatpp::orm::Executor> backend_;
     IDatabase& database_;
-    // Transaction control as ordinary statements so it runs on the same
-    // locked path as everything else.
+    // Transaction control follows the same backend execution path as queries.
     oatpp::data::share::StringTemplate beginTemplate_;
     oatpp::data::share::StringTemplate commitTemplate_;
     oatpp::data::share::StringTemplate rollbackTemplate_;

@@ -21,12 +21,12 @@ std::string textOf(const oatpp::String& value)
 
 UserController::UserController(const std::shared_ptr<ObjectMapper>& objectMapper,
                                std::shared_ptr<services::UserService> userService,
-                               std::shared_ptr<auth::JwtService> jwtService)
-    : ApiController(objectMapper), userService_(std::move(userService)), jwtService_(std::move(jwtService))
+                               std::shared_ptr<services::AuthService> authService)
+    : ApiController(objectMapper), userService_(std::move(userService)), authService_(std::move(authService))
 {
-    if (!userService_ || !jwtService_)
+    if (!userService_ || !authService_)
     {
-        throw errors::internal::OperationFailed("UserController requires UserService and JwtService");
+        throw errors::internal::OperationFailed("UserController requires UserService and AuthService");
     }
 }
 
@@ -49,7 +49,7 @@ domain::UserRole UserController::requireAuthenticatedRole(const std::shared_ptr<
     else
     {
         const auto header = request->getHeader("Authorization");
-        const auto claims = jwtService_->verify(auth::JwtService::extractBearer(textOf(header)));
+        const auto claims = authService_->authenticate(auth::JwtService::extractBearer(textOf(header)));
         roleText = claims.role;
     }
 

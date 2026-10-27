@@ -56,6 +56,9 @@ public:
     /// Exchange a valid refresh token for a fresh access token and rotated refresh token.
     LoginResult refresh(const std::string& refreshToken);
 
+    /// Verify the JWT and current account/session state. Used by every auth path.
+    auth::TokenClaims authenticate(const std::string& accessToken);
+
     /// Resolve a verified token back to a display record.
     LoginResult whoAmI(const auth::TokenClaims& claims);
 

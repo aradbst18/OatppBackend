@@ -32,6 +32,11 @@ const std::string& BaseRepository::tableName() const noexcept
     return tableName_;
 }
 
+bool BaseRepository::sharesDatabaseWith(const BaseRepository& other) const noexcept
+{
+    return db_ == other.db_;
+}
+
 const std::shared_ptr<infrastructure::database::IDatabase>& BaseRepository::database() const noexcept
 {
     return db_;
@@ -44,6 +49,22 @@ bool BaseRepository::tableExists()
 
     const auto rows = fetch<oatpp::Vector<oatpp::Fields<oatpp::Int64>>>(result);
     return !rows->empty() && rows->front()["count"].getValue(0) > 0;
+}
+
+bool BaseRepository::columnExists(const std::string& column)
+{
+    const auto result = database()->backendName() == "POSTGRESQL" ? postgresqlColumnsImp(oatpp::String(tableName_))
+                                                                  : sqlcipherColumnsImp(oatpp::String(tableName_));
+    const auto rows = fetch<oatpp::Vector<oatpp::Fields<oatpp::String>>>(result);
+    for (const auto& row : *rows)
+    {
+        const auto name = row["name"];
+        if (name && std::string(*name) == column)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace app::repositories

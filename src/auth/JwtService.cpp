@@ -26,9 +26,9 @@ JwtService::JwtService(std::string secret, std::string issuer, std::chrono::seco
     }
 }
 
-std::string JwtService::create(const std::string& subject, const std::string& role) const
+std::string JwtService::create(const std::string& subject, const std::string& role, std::int64_t sessionVersion) const
 {
-    if (subject.empty() || role.empty())
+    if (subject.empty() || role.empty() || sessionVersion < 0)
     {
         throw errors::validation::InvalidValue("JWT subject and role must not be empty");
     }
@@ -42,6 +42,7 @@ std::string JwtService::create(const std::string& subject, const std::string& ro
             .set_issued_at(now)
             .set_expires_at(now + ttl_)
             .set_payload_claim("role", jwt::claim(role))
+            .set_payload_claim("session_version", jwt::claim(picojson::value(sessionVersion)))
             .sign(jwt::algorithm::hs256{secret_});
     }
     catch (const errors::AppException&)
@@ -71,6 +72,15 @@ TokenClaims JwtService::verify(const std::string& token) const
         TokenClaims claims;
         claims.subject = decoded.get_subject();
         claims.issuer = decoded.get_issuer();
+        if (!decoded.has_payload_claim("session_version"))
+        {
+            throw errors::authentication::InvalidToken("Legacy access token; sign in again");
+        }
+        claims.sessionVersion = decoded.get_payload_claim("session_version").as_integer();
+        if (claims.sessionVersion < 0)
+        {
+            throw errors::authentication::InvalidToken("Invalid session version");
+        }
 
         if (decoded.has_payload_claim("role"))
         {
