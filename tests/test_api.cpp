@@ -10,16 +10,22 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include <jwt-cpp/jwt.h>
 
 #include "app/application/Application.hpp"
 #include "app/config/AppSettings.hpp"
+#include "app/controllers/UserController.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/errors/ErrorMapper.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
 #include "app/middlewares/CorsInterceptor.hpp"
 #include "app/middlewares/RateLimitInterceptor.hpp"
+#include "app/serialization/AppObjectMapper.hpp"
 
 using namespace app;
 
@@ -529,7 +535,182 @@ std::string getAdminToken(int port)
     return body.substr(pos + key.size(), endPos - pos - key.size());
 }
 
+struct UserWriteRequest
+{
+    std::string method;
+    std::string path;
+    std::string body;
+};
+
+std::vector<UserWriteRequest> userManagementWrites(const std::string& username)
+{
+    return {
+        {"POST", "/users", R"({"username":"newadmin","password":"Changed1234","role":"admin"})"},
+        {"POST", "/users", R"([{"username":"newbatch","password":"Changed1234","role":"admin"}])"},
+        {"POST", "/users/batch", R"([{"username":"newexplicit","password":"Changed1234","role":"admin"}])"},
+        {"PUT", "/users/" + username, R"({"username":"renameduser","password":"Changed1234","role":"admin"})"},
+        {"PATCH", "/users/" + username, R"({"username":"renameduser","password":"Changed1234","role":"admin"})"},
+        {"DELETE", "/users/" + username, ""},
+        {"DELETE", "/users", ""},
+    };
+}
+
+std::string userManagementRequest(int port, const std::string& method, const std::string& path,
+                                  const std::string& token, const std::string& body = "")
+{
+    const std::string authorization = token.empty() ? "" : "Authorization: Bearer " + token + "\r\n";
+    return httpRoundTrip("127.0.0.1", port,
+                         method + " " + path + " HTTP/1.1\r\nHost: x\r\n" + authorization +
+                             "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+                             "\r\nConnection: close\r\n\r\n" + body);
+}
+
+std::string tokenWithRole(const std::optional<std::string>& role)
+{
+    const auto now = std::chrono::system_clock::now();
+    auto builder = jwt::create()
+                       .set_issuer("test-issuer")
+                       .set_subject("admin")
+                       .set_issued_at(now)
+                       .set_expires_at(now + std::chrono::hours(1));
+    if (role)
+    {
+        builder.set_payload_claim("role", jwt::claim(*role));
+    }
+    return builder.sign(jwt::algorithm::hs256{"test-secret-123456789012345678901234"});
+}
+
 }  // namespace
+
+TEST_CASE("api: users allow viewer and operator reads but reject every write without changing data")
+{
+    auto srv = startServer();
+    auto service = srv->app->userService();
+    auto database = srv->app->database();
+    service->createUser({"targetuser", "Original1234", "viewer"});
+
+    for (const std::string role : {"viewer", "operator"})
+    {
+        const std::string username = role + "user";
+        service->createUser({username, "Original1234", role});
+        const auto token = srv->app->authService()->login(username, "Original1234").accessToken;
+        const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
+
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", token)), 200);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users/admin", token)), 200);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users/targetuser", token)), 200);
+
+        for (const auto& target : {std::string("admin"), std::string("targetuser"), username})
+        {
+            for (const auto& request : userManagementWrites(target))
+            {
+                const auto response =
+                    userManagementRequest(srv->port, request.method, request.path, token, request.body);
+                EXPECT_EQ(statusOf(response), 403);
+                EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") ==
+                            original);
+            }
+        }
+
+        // Password-only edits of the administrator and caller must also be rejected.
+        for (const auto& target : {std::string("admin"), username})
+        {
+            EXPECT_EQ(statusOf(userManagementRequest(srv->port, "PATCH", "/users/" + target, token,
+                                                     R"({"password":"Changed1234"})")),
+                      403);
+            EXPECT_EQ(statusOf(userManagementRequest(srv->port, "PUT", "/users/" + target, token,
+                                                     "{\"username\":\"" + target +
+                                                         "\",\"password\":\"Changed1234\",\"role\":\"admin\"}")),
+                      403);
+            EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") ==
+                        original);
+        }
+    }
+}
+
+TEST_CASE("api: users reject missing empty and unknown token roles with 403")
+{
+    auto srv = startServer();
+    auto database = srv->app->database();
+    const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
+    const std::vector<std::optional<std::string>> roles = {std::nullopt, "",       "superuser",
+                                                           "Admin",      "admin ", std::string("admin\0suffix", 12)};
+
+    for (const auto& role : roles)
+    {
+        const auto token = tokenWithRole(role);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", token)), 403);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users/admin", token)), 403);
+        for (const auto& request : userManagementWrites("admin"))
+        {
+            EXPECT_EQ(statusOf(userManagementRequest(srv->port, request.method, request.path, token, request.body)),
+                      403);
+            EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") ==
+                        original);
+        }
+    }
+}
+
+TEST_CASE("api: users reject missing malformed and incorrectly signed tokens with 401")
+{
+    auto srv = startServer();
+    auto database = srv->app->database();
+    const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
+    auth::JwtService otherJwt("other-secret-456789012345678901234", "test-issuer", std::chrono::seconds(3600));
+
+    for (const auto& token : {std::string(), std::string("not.a.token"), otherJwt.create("admin", "admin")})
+    {
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", token)), 401);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users/admin", token)), 401);
+        for (const auto& request : userManagementWrites("admin"))
+        {
+            EXPECT_EQ(statusOf(userManagementRequest(srv->port, request.method, request.path, token, request.body)),
+                      401);
+            EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") ==
+                        original);
+        }
+    }
+}
+
+TEST_CASE("api: users controller enforces roles when the authentication interceptor is absent")
+{
+    auto srv = startServer();
+    controllers::UserController controller(serialization::createAppObjectMapper(), srv->app->userService(),
+                                           srv->app->jwtService());
+    auto database = srv->app->database();
+    const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
+    auto patch = dto::PatchUserDto::createShared();
+    patch->password = "Changed1234";
+
+    const std::vector<std::optional<std::string>> roles = {"viewer", "operator", std::nullopt, "", "superuser"};
+    for (const auto& role : roles)
+    {
+        oatpp::web::protocol::http::Headers headers;
+        headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole(role)));
+        const auto request =
+            controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
+
+        if (role && (*role == "viewer" || *role == "operator"))
+        {
+            EXPECT_EQ(controller.listUsers(request)->getStatus().code, 200);
+            EXPECT_EQ(controller.getUser("admin", request)->getStatus().code, 200);
+        }
+        else
+        {
+            EXPECT_THROW_AS(controller.listUsers(request), errors::authorization::ResourceAccessDenied);
+            EXPECT_THROW_AS(controller.getUser("admin", request), errors::authorization::ResourceAccessDenied);
+        }
+        EXPECT_THROW_AS(controller.patchUser("admin", patch, request), errors::authorization::ResourceAccessDenied);
+        EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") == original);
+    }
+
+    oatpp::web::protocol::http::Headers headers;
+    headers.put("Authorization", oatpp::String("Bearer " + tokenWithRole("admin")));
+    const auto request =
+        controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
+    EXPECT_EQ(controller.patchUser("admin", patch, request)->getStatus().code, 200);
+    EXPECT_FALSE(srv->app->authService()->login("admin", "Changed1234").accessToken.empty());
+}
 
 TEST_CASE("api: users get - list and single user")
 {

@@ -7,6 +7,7 @@
 #include "oatpp/web/server/api/ApiController.hpp"
 
 #include "app/auth/JwtService.hpp"
+#include "app/domain/UserRole.hpp"
 #include "app/dto/UserDtos.hpp"
 #include "app/services/UserService.hpp"
 
@@ -17,6 +18,7 @@ namespace app::controllers
 
 /**
  * User management endpoints:
+ * Reads allow all recognized roles; writes require the admin role from a verified JWT.
  *
  * - GET    /users              List all users
  * - GET    /users/{username}   Get user by username
@@ -66,7 +68,8 @@ public:
     ENDPOINT("DELETE", "/users", deleteAllUsers, REQUEST(std::shared_ptr<IncomingRequest>, request));
 
 private:
-    void ensureAuthenticated(const std::shared_ptr<IncomingRequest>& request);
+    domain::UserRole requireAuthenticatedRole(const std::shared_ptr<IncomingRequest>& request);
+    void requireAdmin(const std::shared_ptr<IncomingRequest>& request);
 
     std::shared_ptr<services::UserService> userService_;
     std::shared_ptr<auth::JwtService> jwtService_;

@@ -30,24 +30,44 @@ UserController::UserController(const std::shared_ptr<ObjectMapper>& objectMapper
     }
 }
 
-void UserController::ensureAuthenticated(const std::shared_ptr<IncomingRequest>& request)
+domain::UserRole UserController::requireAuthenticatedRole(const std::shared_ptr<IncomingRequest>& request)
 {
+    oatpp::Object<dto::AuthClaimsDto> bundled;
     try
     {
-        const auto bundled = request->getBundleData<oatpp::Object<dto::AuthClaimsDto>>(middlewares::kClaimsBundleKey);
-        if (bundled && bundled->subject)
-        {
-            return;
-        }
+        bundled = request->getBundleData<oatpp::Object<dto::AuthClaimsDto>>(middlewares::kClaimsBundleKey);
     }
     catch (...)
     {
     }
 
-    const auto header = request->getHeader("Authorization");
-    const std::string value = header ? header->c_str() : "";
+    std::string roleText;
+    if (bundled && bundled->subject && !bundled->subject->empty())
+    {
+        roleText = textOf(bundled->role);
+    }
+    else
+    {
+        const auto header = request->getHeader("Authorization");
+        const auto claims = jwtService_->verify(auth::JwtService::extractBearer(textOf(header)));
+        roleText = claims.role;
+    }
 
-    jwtService_->verify(auth::JwtService::extractBearer(value));
+    domain::UserRole role{};
+    if (!domain::tryParseUserRole(roleText, role))
+    {
+        throw errors::authorization::ResourceAccessDenied("A recognized user role is required");
+    }
+
+    return role;
+}
+
+void UserController::requireAdmin(const std::shared_ptr<IncomingRequest>& request)
+{
+    if (requireAuthenticatedRole(request) != domain::UserRole::Admin)
+    {
+        throw errors::authorization::ResourceAccessDenied("The admin role is required to manage users");
+    }
 }
 
 #ifdef APP_WITH_SWAGGER
@@ -57,7 +77,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_listUsers(
 {
     info->summary = "Retrieve a list of all registered users";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Returns an array of all registered accounts ordered alphabetically by username.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Allowed roles: `viewer`, `operator`, and `admin`. Returns an array of all registered accounts ordered alphabetically by username.
 
 ## Frontend workflow
 
@@ -91,6 +111,7 @@ curl -s http://localhost:8080/users \
 |------|------------------|-----------------|---------------|
 | 200 | — | Success. Returns JSON array of users. | Render user management table. |
 | 401 | `authentication::InvalidToken` | Token missing, invalid signature, or expired. | Redirect to login. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is missing or unrecognized. | Use an account with the required role. |
 | 500 | `internal::OperationFailed` | Database or unexpected server error. | Show error notification. |)DOC";
 
     info->addTag("users");
@@ -113,13 +134,14 @@ curl -s http://localhost:8080/users \
         .addExample("Standard user list", listExample);
 
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain", "Token role is missing or unrecognized.");
 }
 
 void UserController::Z__ENDPOINT_ADD_INFO_getUser(const std::shared_ptr<oatpp::web::server::api::Endpoint::Info>& info)
 {
     info->summary = "Retrieve a single user by username";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Returns the profile and role for the specified username.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Allowed roles: `viewer`, `operator`, and `admin`. Returns the profile and role for the specified username.
 
 ## Frontend workflow
 
@@ -151,6 +173,7 @@ curl -s http://localhost:8080/users/alice \
 | 200 | — | User found. Returns `UserResponseDto`. | Display user profile. |
 | 400 | `request::Missing` | Username path parameter was empty. | Verify URL formation. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is missing or unrecognized. | Use an account with the required role. |
 | 404 | `database::RecordNotFound` | No account exists with this username. | Show "User not found" message. |)DOC";
 
     info->addTag("users");
@@ -170,6 +193,7 @@ curl -s http://localhost:8080/users/alice \
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing username path parameter.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain", "Token role is missing or unrecognized.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "User not found.");
 }
 
@@ -178,7 +202,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 {
     info->summary = "Add a single user or a batch of users";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Polymorphic creation endpoint supporting both single-user creation and batch array creation.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Polymorphic creation endpoint supporting both single-user creation and batch array creation.
 
 ## Payload Scenarios
 
@@ -210,6 +234,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 | 201 | — | Account(s) created successfully. | Notify success, refresh list. |
 | 400 | `request::Missing` | Missing body or missing required field (`username`, `password`, `role`). | Highlight missing required inputs. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. | Use an account with the required role. |
 | 409 | `database::Conflict` | Username is already registered. | Show "Username already taken". |
 | 422 | `validation::InvalidValue` | Validation failed (length, charset, or invalid role). | Show field-level validation errors. |)DOC";
 
@@ -237,6 +262,8 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing required field or malformed request.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain",
+                                     "Token role is not admin, is missing, or is unrecognized.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "Username already exists.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Input validation failure.");
 }
@@ -246,7 +273,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUsersBatch(
 {
     info->summary = "Add a batch list of new users";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Dedicated endpoint for bulk user provisioning from a JSON array.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Dedicated endpoint for bulk user provisioning from a JSON array.
 
 ## Request Rules
 
@@ -272,6 +299,7 @@ curl -s http://localhost:8080/users/batch \
 | 201 | — | All accounts created. Returns array of `UserResponseDto`. | Show success summary. |
 | 400 | `request::Missing` | Array is empty or an item is missing required fields. | Validate array elements before sending. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. | Use an account with the required role. |
 | 409 | `database::Conflict` | One or more usernames already exist. | Check list for duplicate names. |
 | 422 | `validation::InvalidValue` | One or more fields fail validation constraints. | Fix invalid rows. |)DOC";
 
@@ -286,6 +314,8 @@ curl -s http://localhost:8080/users/batch \
                                                                           "Array of created user profiles.");
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing or empty user batch.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain",
+                                     "Token role is not admin, is missing, or is unrecognized.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "Username conflict in batch.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure in batch item.");
 }
@@ -295,7 +325,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_updateUser(
 {
     info->summary = "Fully update an existing user's data set (PUT)";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Performs a **full update** of an existing user account.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Performs a **full update** of an existing user account.
 
 ## Functional Distinction: PUT vs PATCH
 
@@ -335,7 +365,7 @@ const updated = await res.json();
 | 200 | — | Success. Returns updated `UserResponseDto`. | Update UI state with new username/role. |
 | 400 | `request::Missing` | Path or body fields (`username`, `password`, `role`) omitted. | Ensure all 3 fields are supplied. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
-| 403 | `authorization::ResourceAccessDenied` | Attempted to rename the default admin user. | Admin username is immutable. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming the default admin is also forbidden. | Use an account with the required role. |
 | 404 | `database::RecordNotFound` | Current username does not exist in the database. | Verify target account. |
 | 409 | `database::Conflict` | New username is already in use by another account. | Choose a different username. |
 | 422 | `validation::InvalidValue` | Invalid format for username, password, or role. | Review validation constraints. |)DOC";
@@ -365,7 +395,9 @@ const updated = await res.json();
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing path or required body fields.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
-    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain", "Default admin username cannot be changed.");
+    info->addResponse<oatpp::String>(
+        Status::CODE_403, "text/plain",
+        "Token role is not admin, is missing, or is unrecognized. Default admin username cannot be changed.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");
@@ -376,7 +408,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_patchUser(
 {
     info->summary = "Partially update an existing user's fields (PATCH)";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Performs a **partial update** on an existing user account.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Performs a **partial update** on an existing user account.
 
 ## Functional Distinction: PUT vs PATCH
 
@@ -422,7 +454,7 @@ const user = await res.json();
 | 200 | — | Success. Returns updated `UserResponseDto`. | Update cached user state. |
 | 400 | `request::Missing` | Path missing or empty PATCH body (no fields provided). | Provide at least one field to change. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
-| 403 | `authorization::ResourceAccessDenied` | Attempted to rename the default admin user. | Admin username is immutable. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming the default admin is also forbidden. | Use an account with the required role. |
 | 404 | `database::RecordNotFound` | Current user does not exist. | Account not found. |
 | 409 | `database::Conflict` | New username is already taken. | Choose another username. |
 | 422 | `validation::InvalidValue` | Any provided field fails validation rules. | Fix field validation. |)DOC";
@@ -450,7 +482,9 @@ const user = await res.json();
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing path or empty patch body.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
-    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain", "Default admin username cannot be changed.");
+    info->addResponse<oatpp::String>(
+        Status::CODE_403, "text/plain",
+        "Token role is not admin, is missing, or is unrecognized. Default admin username cannot be changed.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");
@@ -461,7 +495,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_deleteUser(
 {
     info->summary = "Delete a specific user account";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Permanently deletes an existing user account by username.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Permanently deletes an existing user account by username.
 
 ## Admin Protection Guardrail
 
@@ -474,7 +508,7 @@ const res = await fetch(`http://localhost:8080/users/${encodeURIComponent(userna
   method: "DELETE",
   headers: { "Authorization": `Bearer ${accessToken}` }
 });
-if (res.status === 403) { alert("Default admin user cannot be deleted!"); return; }
+if (res.status === 403) { alert("Admin access is required; the default admin cannot be deleted."); return; }
 if (res.status === 404) { alert("User does not exist"); return; }
 if (!res.ok) { throw new Error(await res.text()); }
 ```
@@ -492,7 +526,7 @@ curl -s -X DELETE http://localhost:8080/users/bob \
 | 200 | — | Success. User permanently removed. | Remove user row from UI. |
 | 400 | `request::Missing` | Username path parameter was omitted. | Provide valid username. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
-| 403 | `authorization::ResourceAccessDenied` | Attempted to delete the default admin account. | Default admin is protected. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Default admin deletion is also forbidden. | Use an account with the required role. |
 | 404 | `database::RecordNotFound` | Target username does not exist. | User does not exist. |)DOC";
 
     info->addTag("users");
@@ -505,7 +539,9 @@ curl -s -X DELETE http://localhost:8080/users/bob \
     info->addResponse<oatpp::String>(Status::CODE_200, "text/plain", "User deleted successfully confirmation.");
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing username path parameter.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
-    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain", "Default admin account cannot be deleted.");
+    info->addResponse<oatpp::String>(
+        Status::CODE_403, "text/plain",
+        "Token role is not admin, is missing, or is unrecognized. Default admin account cannot be deleted.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "User not found.");
 }
 
@@ -514,7 +550,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_deleteAllUsers(
 {
     info->summary = "Delete all users while preserving the default admin";
     info->description =
-        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Deletes all registered user accounts while strictly **preserving the default admin user account**.
+        R"DOC(Protected endpoint — **requires `Authorization: Bearer <token>` header**. Requires the `admin` role. Viewer and operator accounts cannot modify users, including themselves. Deletes all registered user accounts while strictly **preserving the default admin user account**.
 
 ## Admin Protection Guardrail
 
@@ -545,6 +581,7 @@ curl -s -X DELETE http://localhost:8080/users \
 |------|------------------|-----------------|---------------|
 | 200 | — | Success. Returns `DeleteUsersResponseDto`. | Show count of deleted accounts. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. | Use an account with the required role. |
 | 500 | `internal::OperationFailed` | Database or unexpected server error. | Show server error alert. |)DOC";
 
     info->addTag("users");
@@ -560,6 +597,8 @@ curl -s -X DELETE http://localhost:8080/users \
         .addExample("Batch deletion outcome", delExample);
 
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain",
+                                     "Token role is not admin, is missing, or is unrecognized.");
 }
 
 #endif  // APP_WITH_SWAGGER
@@ -567,7 +606,7 @@ curl -s -X DELETE http://localhost:8080/users \
 std::shared_ptr<UserController::OutgoingResponse> UserController::listUsers(
     const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAuthenticatedRole(request);
 
     const auto users = userService_->listUsers();
 
@@ -586,7 +625,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::listUsers(
 std::shared_ptr<UserController::OutgoingResponse> UserController::getUser(
     const oatpp::String& username, const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAuthenticatedRole(request);
 
     if (!username || username->empty())
     {
@@ -605,7 +644,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::getUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::createUser(
     const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     const auto bodyStr = request->readBodyToString();
     if (!bodyStr || bodyStr->empty())
@@ -679,7 +718,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::createUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::createUsersBatch(
     const oatpp::Vector<oatpp::Object<dto::UserUpsertDto>>& body, const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     if (!body || body->empty())
     {
@@ -719,7 +758,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::updateUser(
     const oatpp::String& username, const oatpp::Object<dto::UserUpsertDto>& body,
     const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     if (!username || username->empty())
     {
@@ -748,7 +787,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::patchUser(
     const oatpp::String& username, const oatpp::Object<dto::PatchUserDto>& body,
     const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     if (!username || username->empty())
     {
@@ -790,7 +829,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::patchUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::deleteUser(
     const oatpp::String& username, const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     if (!username || username->empty())
     {
@@ -805,7 +844,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::deleteUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::deleteAllUsers(
     const std::shared_ptr<IncomingRequest>& request)
 {
-    ensureAuthenticated(request);
+    requireAdmin(request);
 
     const auto result = userService_->deleteAllUsers();
 
