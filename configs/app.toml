@@ -4,13 +4,13 @@ port = 8080
 
 [database]
 path = "data/postgresql"
-key = "oatpp_test_pw"
+key = "REPLACE_ME"
 port = 5433
 name = "oatpp_backend"
 user = "oatpp_tester"
 
 [jwt]
-secret = "change-me-in-production-min-32-characters-required"
+secret = "REPLACE_ME"
 issuer = "oatpp-backend"
 ttlSeconds = 3600
 

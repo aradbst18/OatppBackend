@@ -2,14 +2,22 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
+#include <thread>
 #include <vector>
+
+#include <sys/stat.h>
 
 #include "app/application/Application.hpp"
 #include "app/config/ConfigStore.hpp"
 #include "app/config/VersionFile.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/infrastructure/TextFile.hpp"
+#include "app/infrastructure/documents/JsonDocument.hpp"
+#include "app/infrastructure/documents/TomlDocument.hpp"
+#include "app/infrastructure/documents/XmlDocument.hpp"
+#include "app/infrastructure/documents/YamlDocument.hpp"
 #include "app/logging/Logger.hpp"
 
 using namespace app;
@@ -56,11 +64,103 @@ bool hasMissing(const std::vector<std::string>& missing, const std::string& leaf
     return std::find(missing.begin(), missing.end(), leaf) != missing.end();
 }
 
+using infrastructure::documents::DocumentValue;
+
+struct ConfigFormat
+{
+    std::unique_ptr<config::IConfigStore> store;
+    std::string (*serialize)(const DocumentValue&);
+    bool xml;
+};
+
+std::vector<ConfigFormat> configFormats()
+{
+    std::vector<ConfigFormat> formats;
+#ifdef APP_WITH_JSON_PARSER
+    formats.push_back({std::make_unique<config::JsonConfigStore>(), infrastructure::documents::serializeJson, false});
+#endif
+#ifdef APP_WITH_TOML_PARSER
+    formats.push_back({std::make_unique<config::TomlConfigStore>(), infrastructure::documents::serializeToml, false});
+#endif
+#ifdef APP_WITH_XML_PARSER
+    formats.push_back({std::make_unique<config::XmlConfigStore>(), infrastructure::documents::serializeXml, true});
+#endif
+#ifdef APP_WITH_YAML_PARSER
+    formats.push_back({std::make_unique<config::YamlConfigStore>(), infrastructure::documents::serializeYaml, false});
+#endif
+    return formats;
+}
+
+DocumentValue minimalConfig()
+{
+    const auto settings = validSettings();
+    auto root = DocumentValue::makeMap();
+    root["database"]["path"] = settings.databasePath;
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    root["database"]["key"] = *settings.databaseKey;
+#endif
+    root["jwt"]["secret"] = settings.jwtSecret;
+    return root;
+}
+
+void writeConfig(const ConfigFormat& format, const std::string& path, const DocumentValue& root)
+{
+    if (format.xml)
+    {
+        auto document = DocumentValue::makeMap();
+        document["app"] = root;
+        infrastructure::writeTextFile(path, format.serialize(document));
+    }
+    else
+    {
+        infrastructure::writeTextFile(path, format.serialize(root));
+    }
+}
+
+void expectConfigRejected(config::IConfigStore& store, const std::string& path, const std::string& field,
+                          const std::string& secret = "")
+{
+    const auto original = infrastructure::readTextFile(path);
+    try
+    {
+        store.load(path);
+        tests::fail("insecure config must be rejected", __FILE__, __LINE__);
+    }
+    catch (const errors::config::Invalid& error)
+    {
+        const std::string message = error.what();
+        EXPECT_TRUE(message.find(field) != std::string::npos);
+        if (!secret.empty())
+        {
+            EXPECT_TRUE(message.find(secret) == std::string::npos);
+        }
+    }
+    EXPECT_EQ(infrastructure::readTextFile(path), original);
+}
+
+struct ScopedUmask
+{
+    mode_t previous;
+    explicit ScopedUmask(mode_t value) : previous(::umask(value))
+    {
+    }
+    ~ScopedUmask()
+    {
+        ::umask(previous);
+    }
+};
+
 }  // namespace
 
-TEST_CASE("config: defaults validate")
+TEST_CASE("config: defaults contain no secrets and require explicit configuration")
 {
-    EXPECT_TRUE(config::AppSettings::defaults().validate().empty());
+    const auto defaults = config::AppSettings::defaults();
+    EXPECT_TRUE(defaults.jwtSecret.empty());
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    EXPECT_FALSE(defaults.databaseKey.has_value());
+#endif
+    EXPECT_FALSE(defaults.validate().empty());
+    EXPECT_TRUE(validSettings().validate().empty());
 }
 
 TEST_CASE("config: validation rejects bad values")
@@ -313,158 +413,347 @@ TEST_CASE("config: legacy flat yaml is rejected")
 }
 #endif  // APP_WITH_YAML_PARSER
 
-#ifdef APP_USER_DATABASE_ENCRYPTED
-TEST_CASE("config: encrypted sqlcipher completes a missing database key")
+TEST_CASE("config: all formats reject missing JWT secrets without modifying the file")
 {
-    // Absent key falls back to defaults like any other missing parameter.
-    const std::string path = tmpPath("nokey.conf");
-    std::string content;
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-missing-jwt.conf";
+        auto root = minimalConfig();
+        root["jwt"].asMap().erase("secret");
+        root["jwt"]["issuer"] = "test-issuer";
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "jwt.secret");
 
-#ifdef APP_CONFIG_JSON
-    content =
-        R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": ":memory:"}, )"
-        R"("jwt": {"secret": "test-secret-123456789012345678901234", "issuer": "test-issuer", "ttlSeconds": 60}, )"
-        R"("logging": {"level": "WARN", "path": ""}})";
-#elif defined(APP_CONFIG_TOML)
-    content =
-        "[server]\nhost = \"127.0.0.1\"\nport = 8080\n"
-        "[database]\npath = \":memory:\"\n"
-        "[jwt]\nsecret = \"test-secret-123456789012345678901234\"\nissuer = \"test-issuer\"\nttlSeconds = 60\n"
-        "[logging]\nlevel = \"WARN\"\npath = \"\"\n";
-#elif defined(APP_CONFIG_XML)
-    content =
-        "<app><server><host>127.0.0.1</host><port>8080</port></server>"
-        "<database><path>:memory:</path></database>"
-        "<jwt><secret>test-secret-123456789012345678901234</secret><issuer>test-issuer</issuer>"
-        "<ttlSeconds>60</ttlSeconds></jwt>"
-        "<logging><level>WARN</level><path></path></logging></app>";
-#elif defined(APP_CONFIG_YAML)
-    content =
-        "server:\n  host: \"127.0.0.1\"\n  port: 8080\n"
-        "database:\n  path: \":memory:\"\n"
-        "jwt:\n  secret: \"test-secret-123456789012345678901234\"\n  issuer: \"test-issuer\"\n  ttlSeconds: 60\n"
-        "logging:\n  level: \"WARN\"\n  path: \"\"\n";
-#else
-#error "No APP_CONFIG_* define set"
-#endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)
+        root.asMap().erase("jwt");
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "jwt.secret");
+        std::remove(path.c_str());
+    }
+}
 
-    infrastructure::writeTextFile(path, content);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+TEST_CASE("config: all formats reject missing database keys without modifying the file")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-missing-key.conf";
+        auto root = minimalConfig();
+        root["database"].asMap().erase("key");
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "database.key");
 
-    auto store = config::createActiveStore();
-    std::vector<std::string> missing;
-    const config::AppSettings loaded = store->load(path, &missing);
+        root.asMap().erase("database");
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "database.key");
+        std::remove(path.c_str());
+    }
+}
+#endif
 
-    EXPECT_TRUE(hasMissing(missing, "database.key"));
-    EXPECT_EQ(loaded.databaseKey, config::AppSettings::defaults().databaseKey);
+#ifdef APP_USER_DATABASE_ENCRYPTED
+TEST_CASE("config: all formats preserve explicitly empty SQLCipher keys as plaintext")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-plaintext.conf";
+        auto root = minimalConfig();
+        root["database"]["key"] = "";
+        writeConfig(format, path, root);
+        std::vector<std::string> missing;
+        const auto loaded = format.store->load(path, &missing);
+        EXPECT_TRUE(loaded.databaseKey.has_value());
+        EXPECT_TRUE(loaded.databaseKey->empty());
+        EXPECT_FALSE(hasMissing(missing, "database.key"));
+        format.store->save(path, loaded);
+        EXPECT_TRUE(format.store->load(path).databaseKey.value().empty());
+        std::remove(path.c_str());
+    }
+}
+#endif
 
-    store->save(path, loaded);
+#ifdef APP_DATABASE_POSTGRESQL
+TEST_CASE("config: all formats reject empty PostgreSQL passwords")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-empty-password.conf";
+        auto root = minimalConfig();
+        root["database"]["key"] = "";
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "database.key");
+        std::remove(path.c_str());
+    }
+}
+#endif
 
-    std::vector<std::string> missingAfter;
-    store->load(path, &missingAfter);
+TEST_CASE("config: all formats reject published sample secrets on load and save")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-sample-secret.conf";
+        for (const std::string sample :
+             {"change-me-in-production-min-32-characters-required", "change-me-in-production",
+              "dev-sqlcipher-key-change-me", "oatpp_test_pw", "REPLACE_ME"})
+        {
+            auto root = minimalConfig();
+            root["jwt"]["secret"] = sample;
+            writeConfig(format, path, root);
+            expectConfigRejected(*format.store, path, "jwt.secret", sample);
+            auto settings = validSettings();
+            settings.jwtSecret = sample;
+            EXPECT_THROW_AS(format.store->save(path, settings), errors::config::Invalid);
+            EXPECT_EQ(settings.validate().find(sample), std::string::npos);
 
-    EXPECT_TRUE(missingAfter.empty());
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+            root = minimalConfig();
+            root["database"]["key"] = sample;
+            writeConfig(format, path, root);
+            expectConfigRejected(*format.store, path, "database.key", sample);
+            settings = validSettings();
+            settings.databaseKey = sample;
+            EXPECT_THROW_AS(format.store->save(path, settings), errors::config::Invalid);
+            EXPECT_EQ(settings.validate().find(sample), std::string::npos);
+#endif
+        }
+        std::remove(path.c_str());
+    }
+}
 
-    // Present-but-empty key is valid: the SQLCipher key is optional, so it
-    // loads with the empty key intact (plaintext mode) and is not a gap.
-    const std::string emptyPath = tmpPath("emptykey.conf");
-    std::string emptyContent;
+TEST_CASE("config: directly constructed applications reject insecure settings")
+{
+    auto settings = validSettings();
+    settings.jwtSecret.clear();
+    EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
+    settings.jwtSecret = "change-me-in-production-min-32-characters-required";
+    EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    settings = validSettings();
+    settings.databaseKey = "dev-sqlcipher-key-change-me";
+    EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
+#endif
+}
 
-#ifdef APP_CONFIG_JSON
-    emptyContent =
-        R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": ":memory:", "key": ""}, )"
-        R"("jwt": {"secret": "test-secret-123456789012345678901234", "issuer": "test-issuer", "ttlSeconds": 60}, )"
-        R"("logging": {"level": "WARN", "path": ""}})";
-#elif defined(APP_CONFIG_TOML)
-    emptyContent =
-        "[server]\nhost = \"127.0.0.1\"\nport = 8080\n"
-        "[database]\npath = \":memory:\"\nkey = \"\"\n"
-        "[jwt]\nsecret = \"test-secret-123456789012345678901234\"\nissuer = \"test-issuer\"\nttlSeconds = 60\n"
-        "[logging]\nlevel = \"WARN\"\npath = \"\"\n";
-#elif defined(APP_CONFIG_XML)
-    emptyContent =
-        "<app><server><host>127.0.0.1</host><port>8080</port></server>"
-        "<database><path>:memory:</path><key></key></database>"
-        "<jwt><secret>test-secret-123456789012345678901234</secret><issuer>test-issuer</issuer>"
-        "<ttlSeconds>60</ttlSeconds></jwt>"
-        "<logging><level>WARN</level><path></path></logging></app>";
-#elif defined(APP_CONFIG_YAML)
-    emptyContent =
-        "server:\n  host: \"127.0.0.1\"\n  port: 8080\n"
-        "database:\n  path: \":memory:\"\n  key: \"\"\n"
-        "jwt:\n  secret: \"test-secret-123456789012345678901234\"\n  issuer: \"test-issuer\"\n  ttlSeconds: 60\n"
-        "logging:\n  level: \"WARN\"\n  path: \"\"\n";
-#else
-#error "No APP_CONFIG_* define set"
-#endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+TEST_CASE("config: directly constructed applications reject an omitted database key")
+{
+    auto settings = config::AppSettings::defaults();
+    settings.jwtSecret = validSettings().jwtSecret;
+    EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
+}
 
-    infrastructure::writeTextFile(emptyPath, emptyContent);
+TEST_CASE("config: all formats refuse to save an omitted programmatic database key")
+{
+    auto settings = validSettings();
+    settings.databaseKey.reset();
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-unconfigured-key.conf";
+        format.store->save(path, validSettings());
+        const auto original = infrastructure::readTextFile(path);
+        EXPECT_THROW_AS(format.store->save(path, settings), errors::config::Invalid);
+        EXPECT_EQ(infrastructure::readTextFile(path), original);
+        std::remove(path.c_str());
+    }
+}
+#endif  // APP_USER_DATABASE_ENCRYPTED || APP_DATABASE_POSTGRESQL
 
-    std::vector<std::string> plainMissing;
-    const config::AppSettings plain = store->load(emptyPath, &plainMissing);
-
-    EXPECT_TRUE(plain.databaseKey.empty());
-    EXPECT_TRUE(!hasMissing(plainMissing, "database.key"));
-
-    std::remove(path.c_str());
-    std::remove(emptyPath.c_str());
+#ifdef APP_USER_DATABASE_ENCRYPTED
+TEST_CASE("config: directly constructed applications accept explicitly selected plaintext")
+{
+    auto settings = validSettings();
+    settings.databaseKey = "";
+    application::Application application{settings};
+    EXPECT_TRUE(application.settings().databaseKey.has_value());
+    EXPECT_TRUE(application.settings().databaseKey->empty());
 }
 #endif  // APP_USER_DATABASE_ENCRYPTED
 
 #ifdef APP_DATABASE_POSTGRESQL
-TEST_CASE("config: postgresql completes a missing database key")
+TEST_CASE("config: directly constructed applications reject an empty PostgreSQL password")
 {
-    // Absent key falls back to defaults like any other missing parameter.
-    const std::string path = tmpPath("nokey-pg.conf");
-    std::string content;
-
-#ifdef APP_CONFIG_JSON
-    content =
-        R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": "data/postgresql", "port": 5433, "name": "x", "user": "y"}, )"
-        R"("jwt": {"secret": "test-secret-123456789012345678901234", "issuer": "test-issuer", "ttlSeconds": 60}, )"
-        R"("logging": {"level": "WARN", "path": ""}})";
-#elif defined(APP_CONFIG_TOML)
-    content =
-        "[server]\nhost = \"127.0.0.1\"\nport = 8080\n"
-        "[database]\npath = \"data/postgresql\"\nport = 5433\nname = \"x\"\nuser = \"y\"\n"
-        "[jwt]\nsecret = \"test-secret-123456789012345678901234\"\nissuer = \"test-issuer\"\nttlSeconds = 60\n"
-        "[logging]\nlevel = \"WARN\"\npath = \"\"\n";
-#elif defined(APP_CONFIG_XML)
-    content =
-        "<app><server><host>127.0.0.1</host><port>8080</port></server>"
-        "<database><path>data/postgresql</path><port>5433</port><name>x</name><user>y</user></"
-        "database>"
-        "<jwt><secret>test-secret-123456789012345678901234</secret><issuer>test-issuer</issuer>"
-        "<ttlSeconds>60</ttlSeconds></jwt>"
-        "<logging><level>WARN</level><path></path></logging></app>";
-#elif defined(APP_CONFIG_YAML)
-    content =
-        "server:\n  host: \"127.0.0.1\"\n  port: 8080\n"
-        "database:\n  path: \"data/postgresql\"\n  port: 5433\n  name: \"x\"\n  user: \"y\"\n"
-        "jwt:\n  secret: \"test-secret-123456789012345678901234\"\n  issuer: \"test-issuer\"\n  ttlSeconds: 60\n"
-        "logging:\n  level: \"WARN\"\n  path: \"\"\n";
-#else
-#error "No APP_CONFIG_* define set"
-#endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)
-
-    infrastructure::writeTextFile(path, content);
-
-    auto store = config::createActiveStore();
-    std::vector<std::string> missing;
-    const config::AppSettings loaded = store->load(path, &missing);
-
-    EXPECT_TRUE(hasMissing(missing, "database.key"));
-    EXPECT_EQ(loaded.databaseKey, config::AppSettings::defaults().databaseKey);
-
-    store->save(path, loaded);
-
-    std::vector<std::string> missingAfter;
-    store->load(path, &missingAfter);
-
-    EXPECT_TRUE(missingAfter.empty());
-
-    std::remove(path.c_str());
+    auto settings = validSettings();
+    settings.databaseKey = "";
+    EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
 }
 #endif  // APP_DATABASE_POSTGRESQL
+
+TEST_CASE("config: new files have independent persistent secrets and owner-only permissions")
+{
+    const auto firstPath = tmpPath("first-install.conf");
+    const auto secondPath = tmpPath("second-install.conf");
+    std::remove(firstPath.c_str());
+    std::remove(secondPath.c_str());
+    ScopedUmask permissive(0);
+    const auto first = application::loadSettingsOrDefaults(firstPath);
+    const auto second = application::loadSettingsOrDefaults(secondPath);
+    EXPECT_TRUE(first.validate().empty());
+    EXPECT_TRUE(second.validate().empty());
+    EXPECT_TRUE(first.jwtSecret != second.jwtSecret);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    EXPECT_TRUE(first.databaseKey.has_value());
+    EXPECT_TRUE(first.databaseKey->size() >= 32);
+    EXPECT_TRUE(first.databaseKey != second.databaseKey);
+    EXPECT_TRUE(first.databaseKey != first.jwtSecret);
+#endif
+    const auto privatePermissions = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write;
+    EXPECT_TRUE((std::filesystem::status(firstPath).permissions() & std::filesystem::perms::mask) ==
+                privatePermissions);
+    const auto original = infrastructure::readTextFile(firstPath);
+    const auto reloaded = application::loadSettingsOrDefaults(firstPath);
+    EXPECT_EQ(reloaded.jwtSecret, first.jwtSecret);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    EXPECT_EQ(reloaded.databaseKey.value(), first.databaseKey.value());
+#endif
+    EXPECT_EQ(infrastructure::readTextFile(firstPath), original);
+    std::remove(firstPath.c_str());
+    std::remove(secondPath.c_str());
+}
+
+TEST_CASE("config: all stores save and replace files with owner-only permissions")
+{
+    ScopedUmask permissive(0);
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-private.conf";
+        std::remove(path.c_str());
+        format.store->save(path, validSettings());
+        const auto privatePermissions = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write;
+        EXPECT_TRUE((std::filesystem::status(path).permissions() & std::filesystem::perms::mask) == privatePermissions);
+        std::filesystem::permissions(path, std::filesystem::perms::all);
+        format.store->save(path, validSettings());
+        EXPECT_TRUE((std::filesystem::status(path).permissions() & std::filesystem::perms::mask) == privatePermissions);
+        EXPECT_EQ(format.store->load(path).jwtSecret, validSettings().jwtSecret);
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: concurrent first starts share one persisted configuration")
+{
+    const auto path = tmpPath("concurrent-startup.conf");
+    std::remove(path.c_str());
+    std::vector<config::AppSettings> loaded(4);
+    std::vector<std::exception_ptr> errors(loaded.size());
+    std::vector<std::thread> workers;
+    for (std::size_t index = 0; index < loaded.size(); ++index)
+    {
+        workers.emplace_back(
+            [&, index]()
+            {
+                try
+                {
+                    loaded[index] = application::loadSettingsOrDefaults(path);
+                }
+                catch (...)
+                {
+                    errors[index] = std::current_exception();
+                }
+            });
+    }
+    for (auto& worker : workers)
+    {
+        worker.join();
+    }
+    const auto persisted = application::loadSettings(path);
+    for (std::size_t index = 0; index < loaded.size(); ++index)
+    {
+        if (errors[index])
+        {
+            std::rethrow_exception(errors[index]);
+        }
+        EXPECT_EQ(loaded[index].jwtSecret, persisted.jwtSecret);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+        EXPECT_EQ(loaded[index].databaseKey.value(), persisted.databaseKey.value());
+#endif
+    }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("config: exclusive creation preserves existing configurations in all formats")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-exclusive.conf";
+        std::remove(path.c_str());
+        format.store->save(path, validSettings(), false);
+        const auto original = infrastructure::readTextFile(path);
+        auto replacement = validSettings();
+        replacement.jwtSecret = "another-private-test-secret-1234567890";
+        format.store->save(path, replacement, false);
+        EXPECT_EQ(infrastructure::readTextFile(path), original);
+        EXPECT_EQ(format.store->load(path).jwtSecret, validSettings().jwtSecret);
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: invalid existing configurations are never regenerated")
+{
+    const auto path = tmpPath("existing-insecure.conf");
+    auto formatList = configFormats();
+    for (auto& format : formatList)
+    {
+        if (std::string(format.store->formatName()) != config::activeFormatName())
+        {
+            continue;
+        }
+        auto root = minimalConfig();
+        root["jwt"]["secret"] = "change-me-in-production-min-32-characters-required";
+        writeConfig(format, path, root);
+        const auto original = infrastructure::readTextFile(path);
+        application::ensureConfigExists(path);
+        EXPECT_THROW_AS(application::loadSettingsOrDefaults(path), errors::config::Invalid);
+        EXPECT_EQ(infrastructure::readTextFile(path), original);
+    }
+    std::remove(path.c_str());
+}
+
+#if defined(APP_WITH_YAML_PARSER) && (defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL))
+TEST_CASE("config: a null YAML key cannot silently select plaintext")
+{
+    const auto path = tmpPath("null-key.yaml");
+    infrastructure::writeTextFile(path,
+                                  "database:\n  path: ':memory:'\n  key: null\n"
+                                  "jwt:\n  secret: 'test-secret-123456789012345678901234'\n");
+    config::YamlConfigStore store;
+    expectConfigRejected(store, path, "database.key");
+    std::remove(path.c_str());
+}
+#endif
+
+TEST_CASE("config: private saves replace symlinks without modifying their targets")
+{
+    const auto path = tmpPath("symlink-config.conf");
+    const auto target = tmpPath("symlink-target.conf");
+    std::remove(path.c_str());
+    infrastructure::writeTextFile(target, "unrelated contents");
+    std::filesystem::create_symlink(target, path);
+    auto store = config::createActiveStore();
+    store->save(path, validSettings());
+    EXPECT_FALSE(std::filesystem::is_symlink(path));
+    EXPECT_EQ(infrastructure::readTextFile(target), std::string("unrelated contents"));
+    EXPECT_EQ(store->load(path).jwtSecret, validSettings().jwtSecret);
+    std::remove(path.c_str());
+    std::remove(target.c_str());
+}
+
+TEST_CASE("config: failed private saves preserve existing contents and clean up staging files")
+{
+    const auto directory = tmpPath("failed-save");
+    const auto destination = directory + "/app.conf";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(destination);
+    infrastructure::writeTextFile(destination + "/sentinel", "preserve this");
+    auto store = config::createActiveStore();
+    EXPECT_THROW_AS(store->save(destination, validSettings()), errors::filesystem::WriteFailed);
+    EXPECT_EQ(infrastructure::readTextFile(destination + "/sentinel"), std::string("preserve this"));
+    std::size_t entries = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory))
+    {
+        EXPECT_EQ(entry.path().filename().string(), std::string("app.conf"));
+        ++entries;
+    }
+    EXPECT_EQ(entries, 1U);
+    std::filesystem::remove_all(directory);
+}
 
 TEST_CASE("config: missing file throws NotFound")
 {
@@ -509,120 +798,45 @@ TEST_CASE("config: active store matches compile-time format")
     EXPECT_EQ(std::string(config::defaultConfigPath()), std::string("configs/app.conf"));
 }
 
-TEST_CASE("config: missing leaves are recorded and completed")
+TEST_CASE("config: missing non-secret leaves are recorded and completed in all formats")
 {
-    // server + database only: jwt/logging (/swagger) fall back to defaults.
-    const std::string path = tmpPath("partial.conf");
-    std::string content;
-
-#ifdef APP_CONFIG_JSON
-#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    content =
-        R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": ":memory:", "key": "test-key-123"}})";
-#else
-    content = R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": ":memory:"}})";
-#endif  // backend key requirement
-#elif defined(APP_CONFIG_TOML)
-    content = "[server]\nhost = \"127.0.0.1\"\nport = 8080\n[database]\npath = \":memory:\"\n";
-#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    content += "key = \"test-key-123\"\n";
-#endif  // backend key requirement
-#elif defined(APP_CONFIG_XML)
-    content =
-        "<app><server><host>127.0.0.1</host><port>8080</port></server><database><path>:memory:</"
-        "path>";
-#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    content += "<key>test-key-123</key>";
-#endif  // backend key requirement
-    content += "</database></app>";
-#elif defined(APP_CONFIG_YAML)
-    content = "server:\n  host: \"127.0.0.1\"\n  port: 8080\ndatabase:\n  path: \":memory:\"\n";
-#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    content += "  key: \"test-key-123\"\n";
-#endif  // backend key requirement
-#else
-#error "No APP_CONFIG_* define set"
-#endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)
-
-    infrastructure::writeTextFile(path, content);
-
-    auto store = config::createActiveStore();
-    std::vector<std::string> missing;
-    const config::AppSettings loaded = store->load(path, &missing);
-
-    EXPECT_TRUE(hasMissing(missing, "jwt.secret"));
-    EXPECT_TRUE(hasMissing(missing, "jwt.issuer"));
-    EXPECT_TRUE(hasMissing(missing, "jwt.ttlSeconds"));
-    EXPECT_TRUE(hasMissing(missing, "logging.level"));
-    EXPECT_TRUE(hasMissing(missing, "logging.path"));
-    EXPECT_TRUE(!hasMissing(missing, "server.host"));
-    EXPECT_TRUE(!hasMissing(missing, "database.path"));
-
-#ifdef APP_DATABASE_POSTGRESQL
-    EXPECT_TRUE(hasMissing(missing, "database.port"));
-    EXPECT_TRUE(hasMissing(missing, "database.name"));
-    EXPECT_TRUE(hasMissing(missing, "database.user"));
-#endif  // APP_DATABASE_POSTGRESQL
-
-#ifdef APP_WITH_SWAGGER
-    EXPECT_TRUE(hasMissing(missing, "swagger.resPath"));
-#endif  // APP_WITH_SWAGGER
-
-    EXPECT_EQ(loaded.jwtSecret, config::AppSettings::defaults().jwtSecret);
-
-    // Completing the file clears the report and keeps the values.
-    store->save(path, loaded);
-
-    std::vector<std::string> missingAfter;
-    const config::AppSettings reloaded = store->load(path, &missingAfter);
-
-    EXPECT_TRUE(missingAfter.empty());
-    EXPECT_EQ(reloaded.jwtSecret, loaded.jwtSecret);
-    EXPECT_EQ(reloaded.logPath, loaded.logPath);
-
-    std::remove(path.c_str());
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-partial.conf";
+        auto root = minimalConfig();
+        root["server"]["port"] = 8080;
+        writeConfig(format, path, root);
+        std::vector<std::string> missing;
+        const auto loaded = format.store->load(path, &missing);
+        EXPECT_TRUE(hasMissing(missing, "server.host"));
+        EXPECT_TRUE(hasMissing(missing, "jwt.issuer"));
+        EXPECT_TRUE(hasMissing(missing, "jwt.ttlSeconds"));
+        EXPECT_TRUE(hasMissing(missing, "logging.level"));
+        EXPECT_TRUE(hasMissing(missing, "logging.path"));
+        EXPECT_FALSE(hasMissing(missing, "jwt.secret"));
+        EXPECT_FALSE(hasMissing(missing, "database.path"));
+        EXPECT_EQ(loaded.jwtSecret, validSettings().jwtSecret);
+        format.store->save(path, loaded);
+        std::vector<std::string> missingAfter;
+        const auto reloaded = format.store->load(path, &missingAfter);
+        EXPECT_TRUE(missingAfter.empty());
+        EXPECT_EQ(reloaded.jwtSecret, loaded.jwtSecret);
+        EXPECT_EQ(reloaded.logPath, loaded.logPath);
+        std::remove(path.c_str());
+    }
 }
 
-TEST_CASE("config: legacy logging.filePath is rejected")
+TEST_CASE("config: legacy logging.filePath is rejected in all formats")
 {
-    const std::string path = tmpPath("oldlog.conf");
-    std::string content;
-
-#ifdef APP_CONFIG_JSON
-    content =
-        R"({"server": {"host": "127.0.0.1", "port": 8080}, "database": {"path": ":memory:"}, )"
-        R"("jwt": {"secret": "test-secret-123456789012345678901234", "issuer": "test-issuer", "ttlSeconds": 60}, )"
-        R"("logging": {"level": "WARN", "filePath": ""}})";
-#elif defined(APP_CONFIG_TOML)
-    content =
-        "[server]\nhost = \"127.0.0.1\"\nport = 8080\n"
-        "[database]\npath = \":memory:\"\n"
-        "[jwt]\nsecret = \"test-secret-123456789012345678901234\"\nissuer = \"test-issuer\"\nttlSeconds = 60\n"
-        "[logging]\nlevel = \"WARN\"\nfilePath = \"\"\n";
-#elif defined(APP_CONFIG_XML)
-    content =
-        "<app><server><host>127.0.0.1</host><port>8080</port></server>"
-        "<database><path>:memory:</path></database>"
-        "<jwt><secret>test-secret-123456789012345678901234</secret><issuer>test-issuer</issuer>"
-        "<ttlSeconds>60</ttlSeconds></jwt>"
-        "<logging><level>WARN</level><filePath></filePath></logging></app>";
-#elif defined(APP_CONFIG_YAML)
-    content =
-        "server:\n  host: \"127.0.0.1\"\n  port: 8080\n"
-        "database:\n  path: \":memory:\"\n"
-        "jwt:\n  secret: \"test-secret-123456789012345678901234\"\n  issuer: \"test-issuer\"\n  ttlSeconds: 60\n"
-        "logging:\n  level: \"WARN\"\n  filePath: \"\"\n";
-#else
-#error "No APP_CONFIG_* define set"
-#endif  // APP_CONFIG format selection (JSON / TOML / XML / YAML)
-
-    infrastructure::writeTextFile(path, content);
-
-    auto store = config::createActiveStore();
-
-    EXPECT_THROW_AS(store->load(path), errors::config::Invalid);
-
-    std::remove(path.c_str());
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath(format.store->formatName()) + "-legacy-log.conf";
+        auto root = minimalConfig();
+        root["logging"]["filePath"] = "legacy.log";
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "logging.filePath");
+        std::remove(path.c_str());
+    }
 }
 
 TEST_CASE("startup: pre-logging failures land beside the executable")

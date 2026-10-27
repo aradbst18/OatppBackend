@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace app::config
@@ -21,11 +22,11 @@ struct AppSettings
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
     // Unified database secret:
-    // - SQLCIPHER: optional file encryption key, applied through SQLCipher's sqlite3_key() at open. An empty key opens the file plaintext (the key is
-    //   optional by design, so a SQLCipher build runs fine without one).
-    // - POSTGRESQL: role password for scram-sha-256 authentication. Must be non-empty (see validate()).
+    // - SQLCIPHER: file encryption key, applied through SQLCipher's sqlite3_key() at open.
+    //   Assigning "" explicitly selects plaintext; nullopt means unconfigured and is rejected.
+    // - POSTGRESQL: role password for scram-sha-256 authentication. Must be present and non-empty.
     // Absent in unencrypted SQLCIPHER builds by design (no secret concept there).
-    std::string databaseKey;
+    std::optional<std::string> databaseKey;
 #endif  // APP_USER_DATABASE_ENCRYPTED || APP_DATABASE_POSTGRESQL
 
     /// PostgreSQL connection parameters (used only when the user database is
@@ -38,7 +39,7 @@ struct AppSettings
     std::string databaseUser = "oatpp";
 #endif  // APP_DATABASE_POSTGRESQL
 
-    std::string jwtSecret = "change-me-in-production-min-32-characters-required";
+    std::string jwtSecret;
     std::string jwtIssuer = "oatpp-backend";
     std::int64_t jwtTtlSeconds = 3600;
     std::string logLevel = "INFO";
@@ -56,7 +57,8 @@ struct AppSettings
     std::string corsAllowedOrigins = "*";
     std::string configSource;  // filled with the file the settings came from
 
-    /// Defaults used when no config file exists (tests, first boot).
+    /// Non-secret defaults. Secrets must be supplied before validation;
+    /// first startup generates and persists them in the new config file.
     static AppSettings defaults();
 
     /// Returns an error description, or empty when valid.

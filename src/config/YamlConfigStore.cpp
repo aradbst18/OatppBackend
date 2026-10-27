@@ -8,6 +8,7 @@
 #include <string>
 
 #include "app/errors/AppException.hpp"
+#include "app/infrastructure/TextFile.hpp"
 #include "app/infrastructure/documents/YamlDocument.hpp"
 
 namespace app::config
@@ -50,8 +51,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
     const infrastructure::documents::DocumentValue root = infrastructure::documents::loadYamlFile(path);
     if (root.isNull())
     {
-        // Empty file: keep defaults, still validated below. Every leaf counts
-        // as missing so the file gets completed on save-back.
+        // Empty files lack required secrets and fail validation below.
         AppSettings s = AppSettings::defaults();
         if (missing != nullptr)
         {
@@ -143,13 +143,13 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
             if (database->contains("host"))
             {
                 throw errors::config::Invalid("database.host was renamed to database.path in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (database->contains("password"))
             {
                 throw errors::config::Invalid("database.password was renamed to database.key in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (!database->contains("path"))
@@ -193,17 +193,18 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-            // Absent key falls back to the built-in default like any other
-            // missing parameter; a present-but-wrongly-typed key throws below.
-            // If the default key cannot open the database, that connection
-            // failure is the operator's to fix.
             if (database->contains("key"))
             {
-                s.databaseKey = infrastructure::documents::stringOr(*database, "key", "");
+                const auto& key = database->at("key");
+                if (!key.isString())
+                {
+                    throw errors::config::Invalid("database.key must be a string in " + path);
+                }
+                s.databaseKey = key.asString();
             }
             else
             {
-                noteMissing("database", "key");
+                throw errors::config::Invalid("database.key must be explicitly configured in " + path);
             }
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
@@ -218,7 +219,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-            noteMissing("database", "key");
+            throw errors::config::Invalid("database.key must be explicitly configured in " + path);
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
 
@@ -260,7 +261,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
             if (logging->contains("filePath"))
             {
                 throw errors::config::Invalid("logging.filePath was renamed to logging.path in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (!logging->contains("level"))
@@ -319,7 +320,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
     }
 }
 
-void YamlConfigStore::save(const std::string& path, const AppSettings& settings)
+void YamlConfigStore::save(const std::string& path, const AppSettings& settings, bool overwrite)
 {
     const std::string err = settings.validate();
     if (!err.empty())
@@ -341,7 +342,7 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings)
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    database["key"] = settings.databaseKey;
+    database["key"] = *settings.databaseKey;
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
 
     infrastructure::documents::DocumentValue jwt = infrastructure::documents::DocumentValue::makeMap();
@@ -365,7 +366,7 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings)
     root["swagger"] = std::move(swagger);
 #endif  // APP_WITH_SWAGGER
 
-    infrastructure::documents::saveYamlFile(path, root);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeYaml(root), overwrite);
 }
 
 }  // namespace app::config

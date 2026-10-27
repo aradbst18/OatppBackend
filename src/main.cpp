@@ -58,11 +58,11 @@ int main(int argc, char** argv)
     std::vector<std::string> missing;
     try
     {
-        // 1) Create the configuration file when missing (per-type defaults:
+        // 1) Create the configuration file with unique secrets when missing (per-type defaults:
         // SQLCIPHER path (+key when set), POSTGRESQL path/key/user/name/port).
         app::application::ensureConfigExists(configPath);
-        // 2) Extract + validate; absent leaves fall back to defaults and are
-        // recorded for completion. Wrong types and invalid values throw.
+        // 2) Extract + validate; absent non-secret leaves fall back to defaults
+        // and are recorded for completion. Missing secrets and invalid values throw.
         settings = app::application::loadSettings(configPath, &missing);
     }
     catch (const app::errors::AppException& ex)

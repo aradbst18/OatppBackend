@@ -33,14 +33,14 @@ class IConfigStore
 public:
     virtual ~IConfigStore() = default;
 
-    /// Load settings, filling absent leaves from defaults. When `missing` is not
-    /// null, every absent leaf is recorded as a dotted path (e.g.
-    /// "jwt.secret") so the caller can complete the file. Present-but-wrong
-    /// typed leaves and invalid values still throw; nothing is recorded for
-    /// them because loading aborts.
+    /// Load settings, filling absent non-secret leaves from defaults. JWT
+    /// secrets and enabled backend keys must be explicit; known sample secrets fail.
+    /// When `missing` is not null, absent non-secret leaves are recorded as
+    /// dotted paths for completion. Wrong types and invalid values throw.
     virtual AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) = 0;
 
-    virtual void save(const std::string& path, const AppSettings& settings) = 0;
+    /// Save privately and atomically. With overwrite=false, keep an existing file.
+    virtual void save(const std::string& path, const AppSettings& settings, bool overwrite = true) = 0;
 
     virtual const char* formatName() const noexcept = 0;
 };
@@ -51,7 +51,7 @@ class JsonConfigStore : public IConfigStore
 public:
     AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
 
-    void save(const std::string& path, const AppSettings& settings) override;
+    void save(const std::string& path, const AppSettings& settings, bool overwrite = true) override;
 
     const char* formatName() const noexcept override
     {
@@ -66,7 +66,7 @@ class TomlConfigStore : public IConfigStore
 public:
     AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
 
-    void save(const std::string& path, const AppSettings& settings) override;
+    void save(const std::string& path, const AppSettings& settings, bool overwrite = true) override;
 
     const char* formatName() const noexcept override
     {
@@ -81,7 +81,7 @@ class XmlConfigStore : public IConfigStore
 public:
     AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
 
-    void save(const std::string& path, const AppSettings& settings) override;
+    void save(const std::string& path, const AppSettings& settings, bool overwrite = true) override;
 
     const char* formatName() const noexcept override
     {
@@ -96,7 +96,7 @@ class YamlConfigStore : public IConfigStore
 public:
     AppSettings load(const std::string& path, std::vector<std::string>* missing = nullptr) override;
 
-    void save(const std::string& path, const AppSettings& settings) override;
+    void save(const std::string& path, const AppSettings& settings, bool overwrite = true) override;
 
     const char* formatName() const noexcept override
     {

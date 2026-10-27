@@ -3,6 +3,20 @@
 Framework: dependency-free harness (`tests/support/TestRunner.hpp`) + CTest.
 No gtest, builds offline. `TEST_CASE("suite: name")`, `EXPECT_TRUE/FALSE/EQ`,
 `EXPECT_THROW_AS`. One binary `app_tests` runs all suites.
+Linux GNU/Clang builds also run `private_text_file_tests`, which wraps `fsync`
+to verify publication and new-parent syncing, interrupted-call retries,
+and failure propagation without affecting the database tests. A non-root permission
+test covers existing and fresh configs beneath search-only ancestors (skipped when
+run as root). Process tests pause a publisher after `mkdir` and exercise both a
+concurrent helper and recovery after killing the creator. These are syscall and
+process fault-injection tests; they do not simulate a physical power loss.
+Marker tests also inject foreign ownership and sticky-directory unlink failures,
+including replacement during cleanup. The `multi-user sticky directories` case
+uses a root-owned mode-1777 parent, an application UID and a different marker-owner
+UID; it proves the kernel returns `EPERM` for deletion, then verifies successful
+unprivileged startup. This case requires root to create the UID-owned fixtures
+(no accounts are created), so ordinary non-root runs explicitly skip it. Run it
+separately with `sudo -- build/cpp001/tests/private_text_file_tests 'multi-user sticky directories'`.
 
 ## Suites
 
@@ -35,25 +49,28 @@ Builds with `APP_ENABLE_POSTGRESQL=ON` link libpq; builds with
 server for every test run (the users table lives there). File-users
 builds only need the server for the `postgres inspector` cases in
 `test_generic_document.cpp`. Connection parameters come from the
-environment with local-throwaway defaults:
+environment with local-throwaway defaults. Full-application PostgreSQL tests
+require a private `PGPASSWORD`; the old published `oatpp_test_pw` is rejected
+by application configuration validation:
 
 ```bash
-# One-time local setup (no sudo needed for a scratch instance, scram-sha-256
-# from the start so no trust window; PGPASSWORD is the database.key):
-echo -n "oatpp_test_pw" > /tmp/opencode/.pwfile && chmod 600 /tmp/opencode/.pwfile
+# Scratch cluster with a private password; keep PGPASSWORD in this shell for test runs.
+read -r -s -p 'Private test PostgreSQL password: ' PGPASSWORD
+export PGPASSWORD
+printf '\n'
+mkdir -p /tmp/opencode
+(umask 077; printf '%s' "$PGPASSWORD" > /tmp/opencode/.pwfile)
 initdb -D /tmp/opencode/pgdata -U postgres --auth=scram-sha-256 --pwfile=/tmp/opencode/.pwfile
 rm /tmp/opencode/.pwfile
 pg_ctl -D /tmp/opencode/pgdata -o "-k /tmp/opencode -p 5433 -h 127.0.0.1" -l /tmp/opencode/pg.log start
-PGPASSWORD=oatpp_test_pw psql -h /tmp/opencode -p 5433 -U postgres -d postgres \
-  -c "CREATE ROLE oatpp_tester LOGIN PASSWORD 'oatpp_test_pw' CREATEDB;"
-pg_ctl -D /tmp/opencode/pgdata stop
+# Enter the same private password for the new role when prompted.
+createuser -h /tmp/opencode -p 5433 -U postgres --createdb --login --pwprompt oatpp_tester
 
-# Test runs (defaults match the setup above; PGHOST is database.path, PGPASSWORD is database.key):
-PGHOST=/tmp/opencode PGPORT=5433 PGUSER=oatpp_tester PGPASSWORD=oatpp_test_pw \
-  cmake -S . -B build-pg -DAPP_ENABLE_POSTGRESQL=ON -DAPP_USERS_DATABASE_TYPE=POSTGRESQL
+cmake -S . -B build-pg -DAPP_ENABLE_POSTGRESQL=ON -DAPP_USERS_DATABASE_TYPE=POSTGRESQL
 cmake --build build-pg --parallel
-PGHOST=/tmp/opencode PGPORT=5433 PGUSER=oatpp_tester PGPASSWORD=oatpp_test_pw \
+PGHOST=/tmp/opencode PGPORT=5433 PGUSER=oatpp_tester \
   ctest --test-dir build-pg --output-on-failure
+pg_ctl -D /tmp/opencode/pgdata stop
 ```
 
 `PGDATABASE` selects the maintenance database for test provisioning

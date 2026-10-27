@@ -65,7 +65,9 @@ invocations, no checked-in matrix); see [`docs/cmake.md`](docs/cmake.md).
 One format active at compile time (`APP_CONFIG_JSON/_TOML/_XML/_YAML` define).
 Same `AppSettings` fields in every format; see [`docs/configuration.md`](docs/configuration.md)
 and `configs/app.{json,toml,xml,yaml}` samples. The runtime file is always
-`configs/app.conf`, created from defaults when missing.
+`configs/app.conf`, created with unique JWT and database secrets when missing.
+The generated file is owner-only (`0600`). Checked-in samples contain rejected
+`REPLACE_ME` placeholders; existing configurations must provide private secrets.
 
 ## SQLCipher (file database) vs PostgreSQL
 
@@ -75,9 +77,8 @@ and `configs/app.{json,toml,xml,yaml}` samples. The runtime file is always
   Empty key means plaintext; with `APP_ENCRYPTION_USER_DATABASE=ON` the
   `database.key` is applied to every connection (never logged) and validated
   with a schema read, so a wrong key fails `open()`. A missing key is
-  completed from defaults like every other parameter; the key stays optional
-  (an explicitly empty key opens the file plaintext and logs a startup
-  warning). `SqlcipherDatabase.hpp` cannot even be included without
+  rejected. An explicitly empty key (`key = ""`) opens the file plaintext
+  and logs a startup warning. `SqlcipherDatabase.hpp` cannot even be included without
   `APP_WITH_SQLCIPHER`.
 - `POSTGRESQL`: `PostgresqlDatabase` over the `oatpp-postgresql` adapter (libpq
   underneath, see [`docs/postgresql.md`](docs/postgresql.md) and `docs/architecture.md` §5); connection from the

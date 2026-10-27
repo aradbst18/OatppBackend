@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "app/errors/AppException.hpp"
+#include "app/infrastructure/TextFile.hpp"
 #include "app/infrastructure/documents/XmlDocument.hpp"
 
 namespace app::config
@@ -127,13 +128,13 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
             if (database->contains("host"))
             {
                 throw errors::config::Invalid("database.host was renamed to database.path in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (database->contains("password"))
             {
                 throw errors::config::Invalid("database.password was renamed to database.key in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (!database->contains("path"))
@@ -187,17 +188,13 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-            // Absent key falls back to the built-in default like any other
-            // missing parameter; a present-but-wrongly-typed key throws below.
-            // If the default key cannot open the database, that connection
-            // failure is the operator's to fix.
             if (database->contains("key"))
             {
                 s.databaseKey = childText(*database, "key", "");
             }
             else
             {
-                noteMissing("database", "key");
+                throw errors::config::Invalid("database.key must be explicitly configured in " + path);
             }
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
@@ -212,7 +209,7 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-            noteMissing("database", "key");
+            throw errors::config::Invalid("database.key must be explicitly configured in " + path);
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
         }
 
@@ -271,7 +268,7 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
             if (logging->contains("filePath"))
             {
                 throw errors::config::Invalid("logging.filePath was renamed to logging.path in " + path +
-                                              ": delete the file to regenerate or rename manually");
+                                              ": rename the setting while preserving existing database credentials");
             }
 
             if (!logging->contains("level"))
@@ -336,7 +333,7 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
     }
 }
 
-void XmlConfigStore::save(const std::string& path, const AppSettings& settings)
+void XmlConfigStore::save(const std::string& path, const AppSettings& settings, bool overwrite)
 {
     const std::string err = settings.validate();
     if (!err.empty())
@@ -358,7 +355,7 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings)
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    database["key"] = settings.databaseKey;
+    database["key"] = *settings.databaseKey;
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
 
     infrastructure::documents::DocumentValue jwt = infrastructure::documents::DocumentValue::makeMap();
@@ -384,7 +381,7 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings)
 
     infrastructure::documents::DocumentValue document = infrastructure::documents::DocumentValue::makeMap();
     document["app"] = std::move(inner);
-    infrastructure::documents::saveXmlFile(path, document);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeXml(document), overwrite);
 }
 
 }  // namespace app::config

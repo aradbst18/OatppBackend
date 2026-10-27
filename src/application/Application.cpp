@@ -77,6 +77,11 @@ void ensureOatppEnvironment()
 
 Application::Application(config::AppSettings settings) : settings_(std::move(settings))
 {
+    const std::string error = settings_.validate();
+    if (!error.empty())
+    {
+        throw errors::config::Invalid("Invalid application settings: " + error);
+    }
 }
 
 Application::~Application()
@@ -171,13 +176,13 @@ void Application::initDatabase()
     {
         infrastructure::database::PostgresqlLocalServer server(settings_.databasePath, settings_.databasePort,
                                                                settings_.databaseName, settings_.databaseUser,
-                                                               settings_.databaseKey);
+                                                               *settings_.databaseKey);
         server.ensureProvisioned();
     }
 
     database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath, settings_.databasePort,
                                                                   settings_.databaseName, settings_.databaseUser,
-                                                                  settings_.databaseKey);
+                                                                  *settings_.databaseKey);
 
 #elif defined(APP_DATABASE_SQLCIPHER)
     // File backend (always SQLCipher-backed; encrypted when a key is set):
@@ -194,12 +199,12 @@ void Application::initDatabase()
     }
 
 #ifdef APP_USER_DATABASE_ENCRYPTED
-    if (settings_.databaseKey.empty())
+    if (settings_.databaseKey->empty())
     {
         logging::logWarn("app", "User database key is empty; opening the file without encryption (plaintext)");
     }
 
-    database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath, settings_.databaseKey);
+    database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath, *settings_.databaseKey);
 #else
     database_ = infrastructure::database::DatabaseFactory::create(settings_.databasePath);
 #endif  // APP_USER_DATABASE_ENCRYPTED
@@ -222,12 +227,6 @@ void Application::initDatabase()
 
 void Application::initServices()
 {
-    if (settings_.jwtSecret.find("change-me") != std::string::npos)
-    {
-        logging::logWarn(
-            "auth", "Using default/insecure JWT secret! Configure a cryptographically random secret in production.");
-    }
-
     jwt_ = std::make_shared<auth::JwtService>(settings_.jwtSecret, settings_.jwtIssuer,
                                               std::chrono::seconds(settings_.jwtTtlSeconds));
     auth_ = std::make_shared<services::AuthService>(users_, jwt_, refreshTokens_);
@@ -411,16 +410,22 @@ void ensureConfigExists(const std::string& configPath)
     std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
     if (infrastructure::fileExists(path))
     {
+        // Another startup may have published the file but not yet synced its
+        // directory entries. Persist them before any database can use its key.
+        infrastructure::syncParentDirectories(path);
         return;
     }
 
     // First startup (or a fresh --config path): materialize the file from
-    // per-type defaults so it always exists going forward. Generate a fresh
-    // cryptographically random 32-byte JWT secret instead of using a static default.
+    // per-type defaults and fresh independent secrets. Existing configurations
+    // are never repaired by inventing replacement secrets.
     auto created = config::AppSettings::defaults();
     created.jwtSecret = auth::generateRandomSecret(32);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    created.databaseKey = auth::generateRandomSecret(32);
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
     auto store = config::createActiveStore();
-    store->save(path, created);
+    store->save(path, created, false);
 }
 
 config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing)

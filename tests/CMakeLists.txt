@@ -44,3 +44,15 @@ foreach(SUITE ${TEST_SUITES})
 endforeach()
 
 add_test(NAME app_tests_all COMMAND app_tests)
+
+# Keep syscall fault injection isolated from application/database tests.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(private_text_file_tests test_main.cpp test_private_text_file.cpp)
+    target_link_libraries(private_text_file_tests PRIVATE app_core)
+    target_link_options(private_text_file_tests PRIVATE "-Wl,--wrap=fsync" "-Wl,--wrap=lstat" "-Wl,--wrap=unlink")
+    apply_app_warnings(private_text_file_tests)
+    apply_app_build_type_flags(private_text_file_tests)
+    apply_app_hardening(private_text_file_tests)
+    app_apply_sanitizers(private_text_file_tests)
+    add_test(NAME test_private_text_file COMMAND private_text_file_tests)
+endif()

@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "app/errors/AppException.hpp"
+#include "app/infrastructure/TextFile.hpp"
 #include "app/infrastructure/documents/TomlDocument.hpp"
 
 namespace app::config
@@ -98,13 +99,13 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
         if (database->find("host") != nullptr)
         {
             throw errors::config::Invalid("database.host was renamed to database.path in " + path +
-                                          ": delete the file to regenerate or rename manually");
+                                          ": rename the setting while preserving existing database credentials");
         }
 
         if (database->find("password") != nullptr)
         {
             throw errors::config::Invalid("database.password was renamed to database.key in " + path +
-                                          ": delete the file to regenerate or rename manually");
+                                          ": rename the setting while preserving existing database credentials");
         }
 
         if (const infrastructure::documents::DocumentValue* dbPath = database->find("path"))
@@ -152,17 +153,13 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-        // Absent key falls back to the built-in default like any other
-        // missing parameter; a present-but-wrongly-typed key throws below.
-        // If the default key cannot open the database, that connection
-        // failure is the operator's to fix.
         if (const infrastructure::documents::DocumentValue* key = database->find("key"))
         {
             s.databaseKey = key->asString();
         }
         else
         {
-            noteMissing("database", "key");
+            throw errors::config::Invalid("database.key must be explicitly configured in " + path);
         }
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
     }
@@ -177,7 +174,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-        noteMissing("database", "key");
+        throw errors::config::Invalid("database.key must be explicitly configured in " + path);
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
     }
 
@@ -222,7 +219,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
         if (logging->find("filePath") != nullptr)
         {
             throw errors::config::Invalid("logging.filePath was renamed to logging.path in " + path +
-                                          ": delete the file to regenerate or rename manually");
+                                          ": rename the setting while preserving existing database credentials");
         }
 
         if (const infrastructure::documents::DocumentValue* level = logging->find("level"))
@@ -300,7 +297,7 @@ AppSettings TomlConfigStore::load(const std::string& path, std::vector<std::stri
     }
 }
 
-void TomlConfigStore::save(const std::string& path, const AppSettings& settings)
+void TomlConfigStore::save(const std::string& path, const AppSettings& settings, bool overwrite)
 {
     const std::string err = settings.validate();
     if (!err.empty())
@@ -322,7 +319,7 @@ void TomlConfigStore::save(const std::string& path, const AppSettings& settings)
 #endif  // APP_DATABASE_POSTGRESQL
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
-    database["key"] = settings.databaseKey;
+    database["key"] = *settings.databaseKey;
 #endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
 
     infrastructure::documents::DocumentValue jwt = infrastructure::documents::DocumentValue::makeMap();
@@ -346,7 +343,7 @@ void TomlConfigStore::save(const std::string& path, const AppSettings& settings)
     root["swagger"] = std::move(swagger);
 #endif  // APP_WITH_SWAGGER
 
-    infrastructure::documents::saveTomlFile(path, root);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeToml(root), overwrite);
 }
 
 }  // namespace app::config

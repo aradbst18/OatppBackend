@@ -6,13 +6,13 @@
     </server>
     <database>
         <path>data/postgresql</path>
-        <key>oatpp_test_pw</key>
+        <key>REPLACE_ME</key>
         <port>5433</port>
         <name>oatpp_backend</name>
         <user>oatpp_tester</user>
     </database>
     <jwt>
-        <secret>change-me-in-production-min-32-characters-required</secret>
+        <secret>REPLACE_ME</secret>
         <issuer>oatpp-backend</issuer>
         <ttlSeconds>3600</ttlSeconds>
     </jwt>

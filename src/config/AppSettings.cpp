@@ -5,6 +5,17 @@
 namespace app::config
 {
 
+namespace
+{
+
+bool isSampleSecret(const std::string& value)
+{
+    return value == "change-me-in-production-min-32-characters-required" || value == "change-me-in-production" ||
+           value == "dev-sqlcipher-key-change-me" || value == "oatpp_test_pw" || value == "REPLACE_ME";
+}
+
+}  // namespace
+
 AppSettings AppSettings::defaults()
 {
     AppSettings s;
@@ -15,7 +26,6 @@ AppSettings AppSettings::defaults()
     // Local socket server defaults (see docs/postgresql.md):
     // socket dir data/postgresql, port 5433, db oatpp_backend, role oatpp_tester.
     s.databasePath = "data/postgresql";
-    s.databaseKey = "oatpp_test_pw";
     s.databasePort = 5433;
     s.databaseName = "oatpp_backend";
     s.databaseUser = "oatpp_tester";
@@ -23,12 +33,8 @@ AppSettings AppSettings::defaults()
 #else
     s.databasePath = "data/app.db";
 
-#ifdef APP_USER_DATABASE_ENCRYPTED
-    s.databaseKey = "dev-sqlcipher-key-change-me";
-#endif  // APP_USER_DATABASE_ENCRYPTED
 #endif  // APP_DATABASE_POSTGRESQL
 
-    s.jwtSecret = "change-me-in-production-min-32-characters-required";
     s.jwtIssuer = "oatpp-backend";
     s.jwtTtlSeconds = 3600;
     s.logLevel = "INFO";
@@ -61,12 +67,23 @@ std::string AppSettings::validate() const
         return "databasePath must not be empty";
     }
 
-#ifdef APP_DATABASE_POSTGRESQL
-    // The SQLCipher key is optional (an empty key opens the file plaintext),
-    // so only PostgreSQL's scram password is required here.
-    if (databaseKey.empty())
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    if (!databaseKey.has_value())
     {
-        return "databaseKey must not be empty for the POSTGRESQL backend (scram-sha-256 password "
+        return "database.key must be explicitly configured";
+    }
+    if (isSampleSecret(*databaseKey))
+    {
+        return "database.key must not use a published sample value; migrate the existing database credentials "
+               "before updating this setting";
+    }
+#endif  // ENCRYPTED SQLCIPHER || POSTGRESQL
+
+#ifdef APP_DATABASE_POSTGRESQL
+    // SQLCipher permits explicitly selected plaintext; PostgreSQL requires a password.
+    if (databaseKey->empty())
+    {
+        return "database.key must not be empty for the POSTGRESQL backend (scram-sha-256 password "
                "required)";
     }
 #endif  // APP_DATABASE_POSTGRESQL
@@ -88,9 +105,14 @@ std::string AppSettings::validate() const
     }
 #endif  // APP_DATABASE_POSTGRESQL
 
+    if (isSampleSecret(jwtSecret))
+    {
+        return "jwt.secret must not use a published sample value; configure a unique random secret";
+    }
+
     if (jwtSecret.size() < 32)
     {
-        return "jwtSecret must be at least 32 characters";
+        return "jwt.secret must be explicitly configured with at least 32 characters";
     }
 
     if (jwtIssuer.empty())

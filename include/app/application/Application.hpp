@@ -116,10 +116,10 @@ private:
 };
 
 /// Operational startup sequence (see docs/configuration.md):
-/// 1) ensureConfigExists: create the config file from per-type defaults when
-///    missing (SQLCIPHER: path, or path+key; POSTGRESQL:
-///    path/key/user/name/port), skip when present (existing files are left
-///    as-is; each backend reads only its own fields).
+/// 1) ensureConfigExists: create the config file from per-type defaults and
+///    fresh private secrets when missing (SQLCIPHER: path, or path+key; POSTGRESQL:
+///    path/key/user/name/port). Existing contents are preserved; directory
+///    entries are synced before proceeding. Each backend reads only its own fields.
 /// 2) loadSettings: parse + validate the file.
 /// Steps 1-2 run before logging exists; failures are reported via
 /// writeCriticalLog() (<exeDir>/logs/yyyy-mm-dd.log next to the executable)
@@ -129,12 +129,14 @@ private:
 /// clear message when the file is missing/invalid.
 config::AppSettings loadSettingsOrDefaults(const std::string& configPath);
 
-/// Step 1: create the config file from defaults when missing; no-op when present.
+/// Step 1: create the config file with unique secrets when missing; sync its
+/// containing directory and pending parent entries before returning, including
+/// when the file already exists. Established ancestors need only search access.
 void ensureConfigExists(const std::string& configPath);
 
 /// Step 2: load + validate an existing config file. Absent leaves fall back to
-/// defaults; when `missing` is not null each absent leaf is recorded as a
-/// dotted path so the caller can complete the file.
+/// non-secret defaults; missing secrets are rejected. When `missing` is not
+/// null each absent non-secret leaf is recorded for file completion.
 config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing = nullptr);
 
 /// Pre-logging failure sink: append one standard-format CRITICAL line to

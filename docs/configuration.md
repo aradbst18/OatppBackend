@@ -18,7 +18,9 @@ fail at configure time). `createActiveStore()` / `activeFormatName()` /
 The runtime file is always `configs/app.conf`, whatever the format — only the
 on-disk syntax follows the active format. `configs/app.{json,toml,xml,yaml}`
 are checked-in samples; the app itself reads/writes `app.conf`, creating it
-from defaults on first startup when missing (see below). A missing explicit
+from non-secret defaults and unique random secrets on first startup when missing
+(see below). Generated and saved configurations have owner-only (`0600`)
+permissions. A missing explicit
 `--config <path>` is created the same way.
 
 Each parser is independently toggleable (`APP_ENABLE_*_PARSER`, all `ON` by
@@ -35,13 +37,17 @@ never linked. Selecting a format whose parser is disabled is a configure-time
 ```json
 {
   "server": {"host": "127.0.0.1", "port": 8080},
-  "database": {"path": "data/postgresql", "key": "oatpp_test_pw", "port": 5433, "name": "oatpp_backend",
+  "database": {"path": "data/postgresql", "key": "REPLACE_ME", "port": 5433, "name": "oatpp_backend",
                "user": "oatpp_tester"},
-  "jwt": {"secret": "change-me-in-production", "issuer": "oatpp-backend", "ttlSeconds": 3600},
+  "jwt": {"secret": "REPLACE_ME", "issuer": "oatpp-backend", "ttlSeconds": 3600},
   "logging": {"level": "INFO", "path": "logs"},
   "swagger": {"resPath": "/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res"}
 }
 ```
+
+The `REPLACE_ME` values above are placeholders and are rejected at startup.
+Use generated secrets for a new installation, or the matching private database
+key/password and a unique JWT secret for an existing installation.
 
 Leaf mapping: `host`/`port`, `database.path` (`databasePath`: file path
 for SQLCIPHER, e.g. `data/app.db`, or Unix socket dir for
@@ -58,25 +64,30 @@ samples either way); a `swagger` section present while disabled is loaded but
 ignored. `validate()` returns `""` when valid, otherwise a
 message used in exceptions. A file that does not match the grouped schema
 fails to load with a descriptive error instead of silently loading defaults
-(delete `configs/app.conf` to regenerate it from defaults).
+(correct the schema while preserving the existing database key).
 
-`database.key` rule: the SQLCipher key is optional — a missing key is
-completed from defaults like every other parameter (recorded in the
-completion log and written back), a present key of any string value is used
-as-is, and an explicitly empty key opens the file plaintext (startup logs a
-warning). A wrong key fails `open()` (validated with a schema read) — the
-operator's to fix. Builds without user-database encryption have no `key`
-concept at all (compiled out); POSTGRESQL always requires it (non-empty
-scram password).
+`database.key` rule: encryption-enabled SQLCipher builds require the key field
+to be present. An explicitly empty string selects plaintext storage (startup
+logs a warning); an omitted key is rejected. Nonempty keys must not match the
+published sample values. A wrong key fails `open()`; changing the configuration
+alone does not re-encrypt an existing database. Builds without user-database
+encryption have no `key` field (compiled out). PostgreSQL always requires an
+explicit, nonempty, private SCRAM password.
+
+For C++ callers, `databaseKey` is an `std::optional<std::string>`: its default
+`std::nullopt` is rejected. Assign a private key for encryption, or assign `""`
+to deliberately select SQLCipher plaintext. PostgreSQL rejects both omission
+and an empty string.
+
 Per-type files: SQLCIPHER writes/reads only `path` (and `key` in encryption
 builds);
 POSTGRESQL only `path`/`key`/`port`/`name`/`user`. Existing files are left
 as-is (each backend reads only its own fields); missing files are created
 with only their backend's fields. For POSTGRESQL `path` (socket dir),
 `port` (non-zero), `name`/`user` (non-empty) and `key` (non-empty scram
-password) are validated. POSTGRESQL defaults match
-[`docs/postgresql.md`](postgresql.md) exactly (`data/postgresql`, `5433`,
-`oatpp_backend`, `oatpp_tester`, `oatpp_test_pw`).
+password) are validated. PostgreSQL location defaults are `data/postgresql`,
+`5433`, `oatpp_backend`, and `oatpp_tester`; the password is generated for a new
+configuration and must match the existing cluster for an existing installation.
 
 Build exclusion: `APP_USERS_DATABASE_TYPE` selects exactly one backend
 (`SQLCIPHER` or `POSTGRESQL`); `APP_ENABLE_SQLCIPHER` toggles file support and
@@ -87,7 +98,7 @@ or compiled in any configuration. No-file builds
 (`USERS=POSTGRESQL`, `ENABLE_SQLCIPHER=OFF`) compile only the PostgreSQL
 backend — no file symbols, no `SqlcipherDocument`.
 
-Startup order: 1) create `configs/app.conf` from per-type defaults when
+Startup order: 1) create `configs/app.conf` from per-type defaults and fresh secrets when
 missing (skip when present); 2) load + validate it — failures in 1)-2) append
 one `HH:MM:SS.mmm [CRITICAL] [config] …` line to
 `<exe-dir>/logs/yyyy-mm-dd.log` (a `logs` directory is created next to the
@@ -100,7 +111,7 @@ configured path); missing file is created on open, existing files are
 verified for schema + `admin` user (`AuthService::ensureSeeded`, which
 creates `admin`/`Admin1234` when absent). With user-database encryption on,
 the file is SQLCipher-encrypted via `database.key` (a missing key is
-completed from defaults; an explicitly empty key opens the file plaintext
+rejected; an explicitly empty key opens the file plaintext
 with a startup warning; a wrong key fails `open()` with
 `errors::database::ConnectionFailed`); with it off, the same SQLCipher-backed
 backend opens the file as plaintext.
@@ -116,21 +127,48 @@ and terminates; a server matching our path/port proceeds normally.
 
 ## Settings completeness
 
-The application guarantees a complete configuration: a missing file is
-created from per-type defaults; an existing file with absent parameters
-keeps its values and gets the missing ones added from defaults — every
-parameter follows this rule with no exceptions, including `database.key`
-(a missing key is completed from defaults; a present key of any string
-value is left untouched — an explicitly empty key means plaintext — and an
-open failure from a wrong key is the operator's to fix). The completed names
-are logged (`group.leaf` list) and
-the file is rewritten. Wrong data types and invalid values are never
-auto-fixed — loading aborts with a critical error for the operator to
-correct.
+A missing configuration file is created with independent cryptographically
+random JWT and database secrets (32 random bytes each, Base64-encoded). These
+values are published only if the file is still absent, so concurrent starts
+load the same persisted secrets. Subsequent starts reuse those values. Secrets are never
+generated to repair an existing configuration.
+
+Existing files must explicitly provide `jwt.secret` (at least 32 characters)
+and `database.key` when that field is enabled. Missing secrets, published sample
+values, wrong types, and invalid values abort startup with a descriptive error
+that identifies the setting without including its value. This policy also
+applies to settings passed directly to `Application`.
+
+Missing non-secret parameters are still filled from defaults, logged as a
+`group.leaf` list, and saved back. Configuration saves use an owner-only temporary
+file and atomic replacement, so partially written secrets are not published.
+Before database initialization can proceed, saves sync the file and its containing
+directory. Established directories are the durable boundary supplied by deployment;
+unchanged ancestors need only search permission, including mode-0111 directories.
+New parent directories are tracked with temporary `.oatpp-dir-*.pending` sibling
+files, persisted before directory creation and removed after the new entry is
+synced. Parents are completed before any children or config files are created.
+Concurrent startups can complete a pending directory, including after an interrupted
+creator, without opening unrelated ancestors. Startups finding an existing config
+still sync its containing directory to cover concurrent file publication.
+Sync failures abort startup; an already published configuration is preserved for
+a later retry. Pending directory markers are completed and removed on retry.
+Only empty regular files with mode `0600`, owned by the effective application
+UID, qualify as recovery markers. Foreign-owned files, symlinks and other invalid
+entries are left untouched and cannot block an established application directory.
+Creating a missing directory still requires a valid private pending record;
+an unrelated entry cannot substitute for that record.
+
+For an installation using an old sample JWT secret, configure a new private
+random secret; previously issued JWTs will no longer verify. For an existing
+SQLCipher database or PostgreSQL cluster using a sample key/password, back up
+the data and explicitly migrate the database credentials before updating
+`database.key`. Changing the setting alone cannot rotate the database key, and
+regenerating a missing configuration cannot recover an existing database key.
 
 `logging.path` was renamed from `logging.filePath`: files still using the
-old name fail with a migration error (rename it or delete the file to
-regenerate).
+old name fail with a migration error (rename it while preserving existing
+secrets).
 
 ## File logging
 
@@ -177,9 +215,10 @@ cmake --build build
 ./build/oatpp-backend --config configs/app.conf
 ```
 
-If the config file does not exist the server creates it from
-`AppSettings::defaults()` (marked `(created)`) and boots with those values,
-which is also what tests use.
+If the config file does not exist, the server creates it from non-secret
+`AppSettings::defaults()` plus newly generated secrets (marked `(created)`).
+`AppSettings::defaults()` by itself is incomplete: programmatic callers must
+explicitly supply secrets before constructing `Application`.
 
 ## Version file
 

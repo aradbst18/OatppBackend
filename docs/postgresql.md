@@ -33,10 +33,13 @@ PostgreSQL connectivity is configured in `AppSettings` under the `database` grou
     "port": 5433,
     "name": "oatpp_backend",
     "user": "oatpp_tester",
-    "key": "oatpp_test_pw"
+    "key": "REPLACE_ME"
   }
 }
 ```
+
+The `REPLACE_ME` placeholder is rejected. New configurations receive a unique
+password automatically; existing clusters require their matching private password.
 
 ### Parameter Semantics
 
@@ -52,7 +55,7 @@ PostgreSQL connectivity is configured in `AppSettings` under the `database` grou
 - **`database.key` (`databaseKey`)**:
   - The database password.
   - **Mandatory**: For PostgreSQL builds, `database.key` must be a non-empty string enforcing SCRAM-SHA-256 authentication.
-  - **Security Invariant**: The password is held in memory only and is strictly redacted from logs, connection dumps, and exception messages.
+  - **Security Invariant**: The password is persisted in the owner-only configuration file and held in memory at runtime. It is never included in configuration validation errors or logs.
 
 ---
 
@@ -105,7 +108,7 @@ For development, testing, or maintenance, you can inspect and manage the local c
 
 ### Connecting with `psql` (Interactive Shell)
 ```bash
-PGPASSWORD=oatpp_test_pw psql \
+psql -W \
   -h "$PWD/data/postgresql" \
   -p 5433 \
   -U oatpp_tester \
