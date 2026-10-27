@@ -6,6 +6,7 @@ add_executable(
     test_serialization.cpp
     test_auth.cpp
     test_database.cpp
+    test_pg_test_db.cpp
     test_api.cpp
     test_websocket.cpp
     test_lifecycle.cpp
@@ -38,6 +39,10 @@ set(TEST_SUITES
     "generic"
     "logging"
     "version")
+
+if(APP_USERS_DATABASE_TYPE STREQUAL "POSTGRESQL")
+    list(APPEND TEST_SUITES "pg_test_db")
+endif()
 
 foreach(SUITE ${TEST_SUITES})
     add_test(NAME "test_${SUITE}" COMMAND app_tests "${SUITE}:")

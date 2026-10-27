@@ -27,6 +27,7 @@ separately with `sudo -- build/cpp001/tests/private_text_file_tests 'multi-user 
 | `test_serialization.cpp` | valid parse, `Int8=64654646` rejection, boundary overflow, negative `UInt8`, malformed JSON, missing/null fields |
 | `test_auth.cpp`        | JWT create/verify, wrong secret, expired, malformed, bearer extraction, login success/401/422, whoami, explicit bootstrap credentials, published-password rejection, existing-account preservation |
 | `test_database.cpp`    | backend name, CRUD, injection stored literally, bad SQL (message names the failing table), `?`/`:` translation rules + parameter-count checks, repository CRUD (create/get/update/delete, not-found, conflict, invalid input), empty-key plaintext mode, wrong-key open failure, password-hash protocol |
+| `test_pg_test_db.cpp`  | PostgreSQL provisioning preserves unrelated databases, independent run ownership, failed creation, cleanup retry, original connection settings |
 | `test_generic_document.cpp` | `DocumentValue` core, JSON/TOML/XML/YAML parse+serialize round-trips, file-database inspector, PostgreSQL inspector (needs server) |
 | `test_api.cpp`         | live HTTP: login 200/token, bad credentials 401, Int8 overflow 400, who-am-i 401/200, interceptor classification, error-code mapping |
 | `test_websocket.cpp`   | real WS handshake (101) + masked `hello` -> `Server echo: hello` |
@@ -43,8 +44,11 @@ databases with `tests::createTestDatabase()` (correct key per backend);
 the wrong-key case writes a scratch file under `/tmp/opencode` instead
 (it must survive across opens to prove the failure is the key);
 `APP_USERS_DATABASE_TYPE=POSTGRESQL` builds provision a fresh
-`oatpp_test_<pid>_<counter>` database per test instead (PostgreSQL has no
-`:memory:`), dropping the previous one on the next call.
+`oatpp_test_<random-run-id>_<counter>` database per call instead (PostgreSQL
+has no `:memory:`). Successful creations are registered with their original
+connection settings. After all test fixtures finish, `test_main.cpp` drops
+only the exact registered names. Cleanup failures identify the database,
+retain it for retry, and make the test process fail.
 
 ## PostgreSQL tests
 
@@ -81,6 +85,18 @@ pg_ctl -D /tmp/opencode/pgdata stop
 (default `postgres`). `scripts/test_matrix.sh` runs its PostgreSQL
 combos only when `pg_isready` answers at `$PGHOST:$PGPORT` (`MATRIX_PG=1`
 forces, `MATRIX_PG=0` skips).
+
+Provisioning never scans for or deletes databases by prefix. Databases left
+by a crash are deliberately preserved; use a disposable cluster per run or
+remove known leftovers explicitly. Sharing a PostgreSQL role or having no
+active connections does not establish which run owns a database.
+
+PostgreSQL-users builds register `test_pg_test_db`; run it against a
+disposable cluster with the same `PG*` environment:
+
+```bash
+ctest --test-dir build-pg -R '^test_pg_test_db$' --output-on-failure
+```
 
 ## Commands
 

@@ -3,21 +3,24 @@
 // Test-only database helpers (see docs/testing.md "PostgreSQL tests").
 // - File backends: :memory: databases (hermetic, no disk, no server).
 // - POSTGRESQL user databases: each createTestDatabase() call provisions a
-//   FRESH uniquely-named database (oatpp_test_<pid>_<counter>) through a
+//   FRESH uniquely-named database (oatpp_test_<run>_<counter>) through a
 //   maintenance connection, because PostgreSQL has no :memory: equivalent
-//   and tests must not share schema. The previously provisioned database is
-//   dropped on the next call (bounded to one leftover); stale names from
-//   crashed runs are swept on first use. All best-effort: a missing server
-//   surfaces errors::database::ConnectionFailed, never silence.
+//   and tests must not share schema. Only successful creations are recorded
+//   for cleanup after all test fixtures have released their connections.
+//   Databases from other or crashed runs are never swept. A missing server
+//   surfaces errors::database::ConnectionFailed.
 // - Connection parameters come from the environment (PGHOST/PGPORT/
 //   PGDATABASE/PGUSER/PGPASSWORD) with local-throwaway defaults matching the
 //   documented initdb setup.
 
-#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
+#include <ostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "app/auth/PasswordHash.hpp"
 #include "app/errors/AppException.hpp"
@@ -103,62 +106,98 @@ inline std::string quotePgIdentifier(const std::string& name)
     return out;
 }
 
-// Provision a fresh test database; drops the previous one our process made
-// and sweeps stale oatpp_test_* names once per process.
-inline std::string makeUniquePgTestDb(const PgTestParams& params)
+/// Tracks only databases created by this run, including the original target
+/// and credentials. Cleanup is explicit so it runs before static destruction
+/// and after the test fixtures release their connections.
+class PgTestDbRegistry
 {
-    static std::atomic<unsigned> counter{0};
-    static std::string previous;
-    static bool swept = false;
+public:
+    PgTestDbRegistry() = default;
+    PgTestDbRegistry(const PgTestDbRegistry&) = delete;
+    PgTestDbRegistry& operator=(const PgTestDbRegistry&) = delete;
 
-    auto maintenance = openPgMaintenance(params);
-    if (!swept)
+    std::string create(const PgTestParams& params)
     {
-        swept = true;
-        try
+        const std::lock_guard<std::mutex> lock(mutex_);
+        useCurrentProcess();
+        auto maintenance = openPgMaintenance(params);
+        // 24 hex digits plus a uint64 counter fit PostgreSQL's 63-byte name
+        // limit. The run token prevents collisions across PID reuse/containers.
+        const std::string name = "oatpp_test_" + runId_ + "_" + std::to_string(++counter_);
+        Entry entry{params, name};
+        // Allocate bookkeeping before CREATE, so allocation failure cannot
+        // leave an unrecorded database after a successful statement.
+        entries_.reserve(entries_.size() + 1);
+        maintenance->execute("CREATE DATABASE " + quotePgIdentifier(name));
+        entries_.push_back(std::move(entry));
+
+        return name;
+    }
+
+    /// Drops exact recorded names only. Failed entries remain available for
+    /// retry; diagnostics omit connection errors because they may carry secrets.
+    bool cleanup(std::ostream& diagnostics)
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        useCurrentProcess();
+        auto entry = entries_.begin();
+        while (entry != entries_.end())
         {
-            // cast(datname as text): the oatpp-postgresql result mapper maps
-            // text-typed columns only (see PostgresqlDatabase.hpp).
-            const auto rows =
-                maintenance->execute("SELECT cast(datname as text) FROM pg_database WHERE datname LIKE 'oatpp_test_%'");
-            for (const auto& row : rows)
+            try
             {
-                if (!row.empty() && row[0] != previous)
-                {
-                    try
-                    {
-                        maintenance->execute("DROP DATABASE IF EXISTS " + quotePgIdentifier(row[0]));
-                    }
-                    catch (...)
-                    {
-                    }
-                }
+                auto maintenance = openPgMaintenance(entry->params);
+                maintenance->execute("DROP DATABASE IF EXISTS " + quotePgIdentifier(entry->name));
+                entry = entries_.erase(entry);
+            }
+            catch (...)
+            {
+                diagnostics << "[FAIL] PostgreSQL test database cleanup: " << entry->name << " (retained for retry)\n";
+                ++entry;
             }
         }
-        catch (...)
-        {
-        }
+
+        return entries_.empty();
     }
 
-    if (!previous.empty())
+private:
+    struct Entry
     {
-        try
-        {
-            maintenance->execute("DROP DATABASE IF EXISTS " + quotePgIdentifier(previous));
-        }
-        catch (...)
-        {
-        }
+        PgTestParams params;
+        std::string name;
+    };
 
-        previous.clear();
+    void useCurrentProcess()
+    {
+        const auto pid = ::getpid();
+        if (pid != processId_)
+        {
+            // A forked child must never inherit authority to delete its
+            // parent's databases. Generate its own run token on first use.
+            auto runId = auth::sha256Hex(auth::generateRandomSecret(16)).substr(0, 24);
+            entries_.clear();
+            counter_ = 0;
+            runId_ = std::move(runId);
+            processId_ = pid;
+        }
     }
 
-    const std::string name = "oatpp_test_" + std::to_string(static_cast<long long>(::getpid())) + "_" +
-                             std::to_string(counter.fetch_add(1) + 1);
-    maintenance->execute("CREATE DATABASE " + quotePgIdentifier(name));
-    previous = name;
+    std::mutex mutex_;
+    std::vector<Entry> entries_;
+    std::string runId_;
+    std::uint64_t counter_ = 0;
+    pid_t processId_ = 0;
+};
 
-    return name;
+inline PgTestDbRegistry& pgTestDbRegistry()
+{
+    static PgTestDbRegistry registry;
+
+    return registry;
+}
+
+inline std::string makeUniquePgTestDb(const PgTestParams& params)
+{
+    return pgTestDbRegistry().create(params);
 }
 #endif  // APP_WITH_POSTGRESQL
 
