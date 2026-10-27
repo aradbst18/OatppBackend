@@ -33,9 +33,8 @@ struct LoginResult
  * Authentication use-cases. Owns credential checking + token issuance so
  * controllers stay thin (DTO in -> service call -> DTO out).
  *
- * Demo policy: users live in UserRepository; the database is seeded with a
- * deterministic admin account (admin / Admin1234) on first boot so the login
- * endpoint works without a separate user-management system.
+ * Initial administrator provisioning requires explicit private credentials.
+ * Existing administrator credentials are preserved across restarts.
  */
 class AuthService
 {
@@ -44,11 +43,12 @@ public:
                 std::shared_ptr<repositories::RefreshTokenRepository> refreshTokens = nullptr,
                 std::chrono::seconds refreshTtl = std::chrono::hours(24 * 7));
 
-    /// Seed an initial admin user if not already present.
-    /// Uses username/password arguments if provided; otherwise checks environment
-    /// variables APP_SEED_ADMIN_USERNAME / APP_SEED_ADMIN_PASSWORD, falling back
-    /// to defaults for local development.
-    void ensureSeeded(const std::string& username = "", const std::string& password = "");
+    /// Ensure the bootstrap administrator exists and return its effective username.
+    /// Nonempty arguments override APP_SEED_ADMIN_USERNAME / APP_SEED_ADMIN_PASSWORD.
+    /// Only the username defaults to "admin"; creation requires a private password.
+    /// Existing accounts must be administrators and must not use the published
+    /// sample password. Their credentials are never overwritten by bootstrap.
+    std::string ensureSeeded(const std::string& username = "", const std::string& password = "");
 
     /// Validate credentials and issue a JWT (+ refresh token if configured).
     LoginResult login(const std::string& username, const std::string& password);
@@ -60,11 +60,9 @@ public:
     LoginResult whoAmI(const auth::TokenClaims& claims);
 
     static constexpr const char* kDefaultSeedUsername = "admin";
-    static constexpr const char* kDefaultSeedPassword = "Admin1234";
 
-    // Legacy aliases kept for compatibility
+    // Legacy username alias kept for compatibility.
     static constexpr const char* kSeedUsername = kDefaultSeedUsername;
-    static constexpr const char* kSeedPassword = kDefaultSeedPassword;
 
 private:
     std::string generateRefreshToken() const;

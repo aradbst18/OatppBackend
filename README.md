@@ -108,9 +108,19 @@ nothing is compiled or linked. See [`docs/zlib.md`](docs/zlib.md).
 ## Running the server
 
 ```bash
+# First startup: supply a private administrator password (input is hidden).
+read -r -s -p 'Initial administrator password: ' APP_SEED_ADMIN_PASSWORD
+export APP_SEED_ADMIN_PASSWORD
+printf '\n'
 ./build/oatpp-backend --config configs/app.conf
 # --help for usage; missing files are created from defaults on startup
 ```
+
+The bootstrap username defaults to `admin`; set `APP_SEED_ADMIN_USERNAME` to
+choose another name and keep that setting on subsequent starts. There is no
+default password. Once the account exists, the bootstrap password may be
+removed from the environment. See [administrator provisioning](docs/authentication.md#administrator-provisioning)
+for validation and migration from the old sample password.
 
 ## API examples
 

@@ -25,13 +25,17 @@ separately with `sudo -- build/cpp001/tests/private_text_file_tests 'multi-user 
 | `test_config.cpp`      | defaults, validation, JSON/TOML/XML/YAML round-trips, corrupt and missing files, save refusal, active-format match, auto-create, missing-param completion, legacy-key rejection, exe-side critical log, version read/complete/validate |
 | `test_validation.cpp`  | `NumericBounds` for all int widths, username/password rules, required fields, `UserRole` parse/reject |
 | `test_serialization.cpp` | valid parse, `Int8=64654646` rejection, boundary overflow, negative `UInt8`, malformed JSON, missing/null fields |
-| `test_auth.cpp`        | JWT create/verify, wrong secret, expired, malformed, bearer extraction, login success/401/422, whoami |
+| `test_auth.cpp`        | JWT create/verify, wrong secret, expired, malformed, bearer extraction, login success/401/422, whoami, explicit bootstrap credentials, published-password rejection, existing-account preservation |
 | `test_database.cpp`    | backend name, CRUD, injection stored literally, bad SQL (message names the failing table), `?`/`:` translation rules + parameter-count checks, repository CRUD (create/get/update/delete, not-found, conflict, invalid input), empty-key plaintext mode, wrong-key open failure, password-hash protocol |
 | `test_generic_document.cpp` | `DocumentValue` core, JSON/TOML/XML/YAML parse+serialize round-trips, file-database inspector, PostgreSQL inspector (needs server) |
 | `test_api.cpp`         | live HTTP: login 200/token, bad credentials 401, Int8 overflow 400, who-am-i 401/200, interceptor classification, error-code mapping |
 | `test_websocket.cpp`   | real WS handshake (101) + masked `hello` -> `Server echo: hello` |
-| `test_lifecycle.cpp`   | `ManagedThread` start/join/idempotent stop, `Application` init idempotency, terminate handler, defaults fallback |
+| `test_lifecycle.cpp`   | `ManagedThread` start/join/idempotent stop, `Application` init idempotency, bootstrap startup failures, custom administrator protection, terminate handler, defaults fallback |
 | `test_features.cpp`    | exactly-one config/users-db define, file-support/user-db consistency, gzip round-trip (or absence, see `docs/zlib.md`), swagger doc build, C++17 check |
+
+Application fixtures set dedicated bootstrap credentials through scoped
+environment overrides and restore the previous environment afterward. Service
+fixtures pass credentials explicitly; tests never rely on production defaults.
 
 Integration tests bind 127.0.0.1 on ports 18081–18090 (HTTP) and
 18281–18299 (WS), waiting ~3s for readiness. File backends use `:memory:`

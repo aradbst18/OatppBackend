@@ -1,5 +1,6 @@
 #include "support/TestRunner.hpp"
 
+#include "support/ScopedEnvironment.hpp"
 #include "support/TestDb.hpp"
 
 #include <atomic>
@@ -11,8 +12,24 @@
 #include "app/application/ManagedThread.hpp"
 #include "app/application/TerminateHandler.hpp"
 #include "app/config/AppSettings.hpp"
+#include "app/errors/AppException.hpp"
 
 using namespace app;
+
+namespace
+{
+
+config::AppSettings applicationSettings()
+{
+    config::AppSettings settings = config::AppSettings::defaults();
+    tests::applyTestDatabaseSettings(settings);
+    settings.jwtSecret = "test-secret-123456789012345678901234";
+    settings.logLevel = "ERROR";
+    settings.logPath = "";
+    return settings;
+}
+
+}  // namespace
 
 TEST_CASE("lifecycle: managed thread starts and joins")
 {
@@ -60,13 +77,9 @@ TEST_CASE("lifecycle: managed thread stop is idempotent")
 
 TEST_CASE("lifecycle: application initialize is idempotent")
 {
-    config::AppSettings s = config::AppSettings::defaults();
-    tests::applyTestDatabaseSettings(s);
-    s.jwtSecret = "test-secret-123456789012345678901234";
-    s.logLevel = "ERROR";
-    s.logPath = "";  // keep tests hermetic: no log files on disk
-
-    application::Application app(std::move(s));
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    application::Application app(applicationSettings());
     app.initialize();
     app.initialize();
 
@@ -76,6 +89,47 @@ TEST_CASE("lifecycle: application initialize is idempotent")
 
     app.stop();
     app.stop();  // idempotent
+}
+
+TEST_CASE("lifecycle: application startup requires explicit initial administrator credentials")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", nullptr);
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", nullptr);
+    application::Application app(applicationSettings());
+    EXPECT_THROW_AS(app.initialize(), errors::config::Missing);
+    EXPECT_FALSE(app.isRunning());
+}
+
+TEST_CASE("lifecycle: application startup rejects the published bootstrap password")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "Admin1234");
+    application::Application app(applicationSettings());
+    EXPECT_THROW_AS(app.initialize(), errors::config::Invalid);
+    EXPECT_FALSE(app.isRunning());
+}
+
+TEST_CASE("lifecycle: custom bootstrap administrator is protected by user management")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "customAdmin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    application::Application app(applicationSettings());
+    app.initialize();
+    EXPECT_EQ(app.authService()->login("customAdmin", "TestAdmin8391").role, std::string("admin"));
+
+    auto users = app.userService();
+    EXPECT_THROW_AS(users->deleteUser("customAdmin"), errors::authorization::ResourceAccessDenied);
+    const services::UpdateUserInput rename("renamedAdmin", "TestAdmin8391", "admin");
+    EXPECT_THROW_AS(users->updateUser("customAdmin", rename), errors::authorization::ResourceAccessDenied);
+    services::PatchUserInput patch;
+    patch.username = "renamedAdmin";
+    EXPECT_THROW_AS(users->patchUser("customAdmin", patch), errors::authorization::ResourceAccessDenied);
+
+    users->createUser({"admin", "OtherAdmin8391", "viewer"});
+    EXPECT_EQ(users->deleteAllUsers().deletedCount, 1);
+    EXPECT_EQ(users->listUsers().size(), 1U);
+    EXPECT_EQ(users->getUser("customAdmin").role, std::string("admin"));
+    app.stop();
 }
 
 TEST_CASE("lifecycle: terminate handler installs without crashing")

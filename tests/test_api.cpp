@@ -1,5 +1,6 @@
 #include "support/TestRunner.hpp"
 
+#include "support/ScopedEnvironment.hpp"
 #include "support/TestDb.hpp"
 
 #include <arpa/inet.h>
@@ -168,6 +169,8 @@ config::AppSettings testSettings(int port)
 
 struct TestServer
 {
+    tests::ScopedEnvironment adminUsername{"APP_SEED_ADMIN_USERNAME", "admin"};
+    tests::ScopedEnvironment adminPassword{"APP_SEED_ADMIN_PASSWORD", "TestAdmin8391"};
     std::unique_ptr<application::Application> app;
     std::thread thread;
     int port{0};
@@ -248,7 +251,7 @@ std::unique_ptr<TestServer> startServer()
 
 std::string loginAndGetToken(const std::string& host, int port)
 {
-    const std::string payload = R"({"username":"admin","password":"Admin1234"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -283,25 +286,29 @@ TEST_CASE("api: login returns 200 with token")
     EXPECT_TRUE(!token.empty());
 }
 
-TEST_CASE("api: login rejects bad credentials with 401")
+TEST_CASE("api: login rejects bad credentials and the published password with 401")
 {
     auto srv = startServer();
 
-    const std::string payload = R"({"username":"admin","password":"Wrong1234"})";
-    const std::string req =
-        "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
-        "application/json\r\nContent-Length: " +
-        std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;
+    for (const char* password : {"Wrong1234", "Admin1234"})
+    {
+        const std::string payload = std::string(R"({"username":"admin","password":")") + password + R"("})";
+        const std::string req =
+            "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
+            "application/json\r\nContent-Length: " +
+            std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;
 
-    const std::string resp = httpRoundTrip("127.0.0.1", srv->port, req);
-    EXPECT_EQ(statusOf(resp), 401);
+        const std::string resp = httpRoundTrip("127.0.0.1", srv->port, req);
+        EXPECT_EQ(statusOf(resp), 401);
+        EXPECT_EQ(bodyOf(resp).find("access_token"), std::string::npos);
+    }
 }
 
 TEST_CASE("api: login with Int8 overflow returns 400")
 {
     auto srv = startServer();
 
-    const std::string payload = R"({"username":"admin","password":"Admin1234","pinCode":64654646})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391","pinCode":64654646})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -378,7 +385,7 @@ TEST_CASE("api: refresh token endpoint roundtrip and rotation")
     auto srv = startServer();
 
     // 1. Login
-    const std::string loginPayload = R"({"username":"admin","password":"Admin1234"})";
+    const std::string loginPayload = R"({"username":"admin","password":"TestAdmin8391"})";
     const std::string loginReq =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(loginPayload.size()) + "\r\nConnection: close\r\n\r\n" + loginPayload;
@@ -493,7 +500,7 @@ TEST_CASE("api: cors attaches headers to responses")
 {
     auto srv = startServer();
 
-    const std::string payload = R"({"username":"admin","password":"Admin1234"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nOrigin: https://app.example.com\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -518,7 +525,7 @@ namespace
 
 std::string getAdminToken(int port)
 {
-    const std::string payload = R"({"username":"admin","password":"Admin1234"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;

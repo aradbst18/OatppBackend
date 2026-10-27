@@ -78,7 +78,7 @@ std::shared_ptr<oatpp::swagger::DocumentInfo> createDocumentInfo()
             "\n"
             "## Quickstart for frontend developers\n"
             "\n"
-            "1. `POST /auth/login` with `{\"username\": \"admin\", \"password\": \"Admin1234\"}` "
+            "1. `POST /auth/login` with your configured account's username and private password "
             "to obtain `access_token`.\n"
             "2. Send the token on every protected call as `Authorization: Bearer <access_token>`.\n"
             "3. `GET /auth/who-am-i` verifies your wiring and returns `{username, role}`.\n"

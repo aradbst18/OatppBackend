@@ -39,7 +39,7 @@ void AuthController::Z__ENDPOINT_ADD_INFO_login(const std::shared_ptr<oatpp::web
 const res = await fetch("http://localhost:8080/auth/login", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ username: "admin", password: "Admin1234" })
+  body: JSON.stringify({ username: "admin", password: "<your-private-password>" })
 });
 if (!res.ok) { throw new Error(await res.text()); }
 const { access_token, username, role, expires_in } = await res.json();
@@ -47,10 +47,10 @@ const { access_token, username, role, expires_in } = await res.json();
 ```
 
 ```bash
-# cURL equivalent (seeded demo account)
+# cURL equivalent (replace with your account credentials)
 curl -s http://localhost:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"Admin1234"}' | jq
+  -d '{"username":"admin","password":"<your-private-password>"}' | jq
 ```
 
 ## Request rules
@@ -58,7 +58,7 @@ curl -s http://localhost:8080/auth/login \
 - `username`: **4-18** chars, charset `[a-zA-Z0-9@#$]`, case-sensitive.
 - `password`: **6-48** chars, must contain **at least one letter and one digit**.
 - `pinCode` (optional): demo `Int8` field (`-128..127`). Out-of-range values never reach the controller — deserialization fails first with `400`. Omit it unless you are testing integer range validation.
-- Seeded demo account: `admin` / `Admin1234` (created on first boot if missing).
+- Use the credentials supplied by your administrator. There is no default login password.
 
 ## How errors are reported
 
@@ -85,9 +85,9 @@ Note the deliberate `422` vs `401` split: `422` means "fix the input shape", `40
 
     auto example = dto::LoginRequestDto::createShared();
     example->username = oatpp::String("admin");
-    example->password = oatpp::String("Admin1234");
+    example->password = oatpp::String("<your-private-password>");
     info->addConsumes<Object<dto::LoginRequestDto>>("application/json", "Login credentials.")
-        .addExample("Seeded admin login", example);
+        .addExample("Login credentials (replace placeholders)", example);
 
     auto ok = dto::LoginResponseDto::createShared();
     ok->accessToken = oatpp::String(

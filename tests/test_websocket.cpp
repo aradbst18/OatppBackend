@@ -1,5 +1,6 @@
 #include "support/TestRunner.hpp"
 
+#include "support/ScopedEnvironment.hpp"
 #include "support/TestDb.hpp"
 
 #include <arpa/inet.h>
@@ -123,6 +124,8 @@ TEST_CASE("websocket: base64 helper sanity")
 
 TEST_CASE("websocket: echo roundtrip")
 {
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
     // Boot the full application on the first free port in the test range.
     std::unique_ptr<application::Application> holder;
     int port = 0;

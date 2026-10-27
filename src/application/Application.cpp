@@ -230,9 +230,9 @@ void Application::initServices()
     jwt_ = std::make_shared<auth::JwtService>(settings_.jwtSecret, settings_.jwtIssuer,
                                               std::chrono::seconds(settings_.jwtTtlSeconds));
     auth_ = std::make_shared<services::AuthService>(users_, jwt_, refreshTokens_);
-    auth_->ensureSeeded();
+    const std::string adminUsername = auth_->ensureSeeded();
 
-    userService_ = std::make_shared<services::UserService>(users_, services::AuthService::kDefaultSeedUsername);
+    userService_ = std::make_shared<services::UserService>(users_, adminUsername);
     logging::logInfo("app", "Services initialized");
 }
 

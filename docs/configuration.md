@@ -108,8 +108,14 @@ REST/Oatpp components; 6) REST server; 7) serve.
 Startup provisioning: SQLCIPHER boots check `database.path`: a path
 elsewhere is treated as non-existent (a new database is created at the
 configured path); missing file is created on open, existing files are
-verified for schema + `admin` user (`AuthService::ensureSeeded`, which
-creates `admin`/`Admin1234` when absent). With user-database encryption on,
+verified for schema + the selected bootstrap administrator
+(`AuthService::ensureSeeded`). Creating that account requires an explicit
+`APP_SEED_ADMIN_PASSWORD`; only the username defaults to `admin`.
+`APP_SEED_ADMIN_USERNAME` selects another username and must stay configured on
+later starts. Existing administrator passwords are preserved; the published
+sample password aborts startup. See [administrator provisioning](authentication.md#administrator-provisioning)
+for credential validation and migration. This policy applies to both backends.
+With user-database encryption on,
 the file is SQLCipher-encrypted via `database.key` (a missing key is
 rejected; an explicitly empty key opens the file plaintext
 with a startup warning; a wrong key fails `open()` with

@@ -2,10 +2,14 @@
 
 ## Login
 
+Use the username and private password configured during
+[administrator provisioning](authentication.md#administrator-provisioning).
+The placeholders below must be replaced with those credentials.
+
 ```bash
 curl -X POST http://127.0.0.1:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"Admin1234"}'
+  -d '{"username":"<admin-username>","password":"<your-private-password>"}'
 ```
 
 ```json
@@ -23,7 +27,7 @@ curl -X POST http://127.0.0.1:8080/auth/login \
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"Admin1234"}' \
+  -d '{"username":"<admin-username>","password":"<your-private-password>"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 curl http://127.0.0.1:8080/auth/who-am-i -H "Authorization: Bearer $TOKEN"
 ```
@@ -55,7 +59,7 @@ curl -X POST http://127.0.0.1:8080/auth/login \
 ```bash
 curl -X POST http://127.0.0.1:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"Admin1234","pinCode":64654646}'
+  -d '{"username":"<admin-username>","password":"<your-private-password>","pinCode":64654646}'
 # -> 400, deserialization "Value out of range"; never reaches the service
 ```
 

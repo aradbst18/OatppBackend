@@ -1,5 +1,7 @@
 #include "app/services/AuthService.hpp"
 
+#include <cstdlib>
+
 #include "app/auth/PasswordHash.hpp"
 #include "app/domain/UserRole.hpp"
 #include "app/errors/AppException.hpp"
@@ -23,7 +25,7 @@ AuthService::AuthService(std::shared_ptr<repositories::UserRepository> users, st
     }
 }
 
-void AuthService::ensureSeeded(const std::string& customUsername, const std::string& customPassword)
+std::string AuthService::ensureSeeded(const std::string& customUsername, const std::string& customPassword)
 {
     std::string seedUser = customUsername;
     if (seedUser.empty())
@@ -32,34 +34,73 @@ void AuthService::ensureSeeded(const std::string& customUsername, const std::str
         seedUser = (envUser != nullptr && envUser[0] != '\0') ? envUser : kDefaultSeedUsername;
     }
 
+    if (!validation::isValidUsername(seedUser))
+    {
+        throw errors::config::Invalid("Bootstrap admin username must be 4-18 characters from [a-zA-Z0-9@#$]");
+    }
+
+    oatpp::Object<repositories::UserDto> existing;
+    try
+    {
+        existing = users_->getUser(seedUser);
+    }
+    catch (const errors::database::RecordNotFound&)
+    {
+        // Only a missing account permits initial provisioning.
+    }
+
+    if (existing)
+    {
+        if (!existing->role || std::string(*existing->role) != domain::toString(domain::UserRole::Admin) ||
+            !existing->passwordHash || existing->passwordHash->empty())
+        {
+            throw errors::config::Invalid("Bootstrap account must be an administrator with a stored password hash");
+        }
+
+        if (auth::passwordVerify("Admin1234", std::string(*existing->passwordHash)))
+        {
+            throw errors::config::Invalid(
+                "Bootstrap administrator still uses the published sample password; reset its stored password "
+                "and invalidate its sessions before restarting. APP_SEED_ADMIN_PASSWORD does not reset existing "
+                "accounts");
+        }
+
+        logging::logInfo("auth", "Admin account '" + seedUser + "' already present; database ready");
+        return seedUser;
+    }
+
     std::string seedPass = customPassword;
     if (seedPass.empty())
     {
         const char* envPass = std::getenv("APP_SEED_ADMIN_PASSWORD");
-        seedPass = (envPass != nullptr && envPass[0] != '\0') ? envPass : kDefaultSeedPassword;
-    }
-
-    if (!users_->isUserExists(seedUser))
-    {
-        if (seedPass == kDefaultSeedPassword)
+        if (envPass != nullptr)
         {
-            logging::logWarn("auth",
-                             "Seeding admin account with DEFAULT password ('Admin1234')! Set APP_SEED_ADMIN_PASSWORD "
-                             "in production.");
+            seedPass = envPass;
         }
-
-        auto user = oatpp::Object<repositories::UserDto>::createShared();
-        user->username = seedUser;
-        user->passwordHash = auth::passwordHash(seedPass);
-        user->role = domain::toString(domain::UserRole::Admin);
-
-        users_->createUser(user);
-        logging::logInfo("auth", "Seeded admin account '" + seedUser + "'");
     }
-    else
+
+    if (seedPass.empty())
     {
-        logging::logInfo("auth", "Admin account '" + seedUser + "' already present; database ready");
+        throw errors::config::Missing("APP_SEED_ADMIN_PASSWORD is required to create the initial administrator");
     }
+    if (seedPass == "Admin1234")
+    {
+        throw errors::config::Invalid("Bootstrap admin password must not be the published sample password");
+    }
+    if (!validation::isValidPassword(seedPass) || seedPass.find('\0') != std::string::npos)
+    {
+        throw errors::config::Invalid(
+            "Bootstrap admin password must be 6-48 characters with a letter and a digit, without NUL characters");
+    }
+
+    auto user = oatpp::Object<repositories::UserDto>::createShared();
+    user->username = seedUser;
+    user->passwordHash = auth::passwordHash(seedPass);
+    user->role = domain::toString(domain::UserRole::Admin);
+
+    users_->createUser(user);
+    logging::logInfo("auth", "Seeded admin account '" + seedUser + "'");
+    return seedUser;
 }
 
 LoginResult AuthService::login(const std::string& username, const std::string& password)

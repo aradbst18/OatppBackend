@@ -4,10 +4,42 @@
 
 - `JwtService` (`app/auth/`) is the only crypto owner: HS256 via jwt-cpp,
   claims `{iss, sub, role, iat, exp}`, 30s clock-skew leeway, issuer enforced.
-- `AuthService` checks demo credentials from `UserRepository` and issues
-  tokens. Seed account: `admin / Admin1234` (role `admin`), created once via
-  `ensureSeeded()`.
+- `AuthService` checks credentials from `UserRepository` and issues tokens.
+  `ensureSeeded()` provisions an administrator using explicit private credentials
+  and returns the effective username for account protection in `UserService`.
 - `AuthInterceptor` enforces authentication per request.
+
+## Administrator provisioning
+
+Set `APP_SEED_ADMIN_PASSWORD` to a unique private password for the first startup.
+`APP_SEED_ADMIN_USERNAME` selects the account name and defaults to `admin` when
+unset or empty. C++ callers may pass credentials to `ensureSeeded(username, password)`;
+nonempty arguments override the corresponding environment variables.
+
+When the selected account is absent, an unset or empty password aborts startup
+before HTTP routing is created, without inserting an account. Usernames must
+contain 4-18 characters from `[a-zA-Z0-9@#$]`. Passwords must contain 6-48
+characters, including a letter and a digit, with no NUL characters. Use a long,
+randomly generated password within those limits. The published `Admin1234`
+password is rejected even when explicitly supplied. No demo account is created
+automatically in any build.
+
+On subsequent starts, keep the selected username configured. The password is
+not required again: bootstrap verifies that the existing account is an
+administrator and preserves its stored password, including later password
+changes. A colliding non-administrator account causes a configuration error;
+bootstrap never promotes it or resets its credentials. The selected account
+is protected against deletion and renaming, including bulk deletion.
+
+For an installation created with the former `Admin1234` password, startup now
+fails while the selected account still uses it. Changing
+`APP_SEED_ADMIN_PASSWORD` does not reset an existing account. Before restarting,
+use a trusted offline maintenance process to replace the stored password hash
+with one produced by `auth::passwordHash()` for a new private password. Audit
+other former bootstrap accounts as well if the configured username has changed.
+Revoke affected refresh tokens and rotate `jwt.secret` to invalidate previously
+issued access tokens. JWT secret rotation alone does not revoke refresh tokens.
+Provisioning neither resets passwords nor invalidates sessions automatically.
 
 ## Endpoints
 
