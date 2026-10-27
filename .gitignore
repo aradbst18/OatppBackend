@@ -89,3 +89,11 @@ vcpkg_installed/
 # ── Local archives & scratch ────────────────────────────────────────
 archives/
 
+# ── Local agent configuration & generated knowledge graph ───────────
+.agents/
+.codex/
+.claude/
+graphify-out/
+AGENTS.md
+CLAUDE.md
+
