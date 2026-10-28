@@ -93,6 +93,7 @@ archives/
 .agents/
 .codex/
 .claude/
+.serena/
 graphify-out/
 AGENTS.md
 CLAUDE.md
