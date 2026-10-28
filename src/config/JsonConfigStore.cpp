@@ -95,7 +95,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
                 throw errors::config::Invalid("Invalid <port> type in " + source + ": expected a number");
             }
 
-            const int portValue = static_cast<int>(port->asInt());
+            const auto portValue = port->asInt();
             if (portValue < 1 || portValue > 65535)
             {
                 throw errors::config::Invalid("port out of range in " + source);
@@ -152,7 +152,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
                 throw errors::config::Invalid("Invalid <port> type in " + source + ": expected a number");
             }
 
-            const int portValue = static_cast<int>(port->asInt());
+            const auto portValue = port->asInt();
             if (portValue < 1 || portValue > 65535)
             {
                 throw errors::config::Invalid("database.port out of range in " + source);

@@ -127,7 +127,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
             {
                 if (!port->isNull())
                 {
-                    const int portValue = static_cast<int>(port->asInt());
+                    const auto portValue = port->asInt();
                     if (portValue < 1 || portValue > 65535)
                     {
                         throw errors::config::Invalid("port out of range in " + path);
@@ -173,7 +173,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
             {
                 if (!dbPort->isNull())
                 {
-                    const int portValue = static_cast<int>(dbPort->asInt());
+                    const auto portValue = dbPort->asInt();
                     if (portValue < 1 || portValue > 65535)
                     {
                         throw errors::config::Invalid("database.port out of range in " + path);

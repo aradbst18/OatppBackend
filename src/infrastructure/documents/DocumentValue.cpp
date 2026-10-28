@@ -1,5 +1,7 @@
 #include "app/infrastructure/documents/DocumentValue.hpp"
 
+#include <cmath>
+
 #include "app/errors/AppException.hpp"
 
 namespace app::infrastructure::documents
@@ -169,10 +171,10 @@ std::int64_t DocumentValue::asInt() const
     if (const double* value = std::get_if<double>(&data_))
     {
         const double raw = *value;
-        const auto coerced = static_cast<std::int64_t>(raw);
-        if (static_cast<double>(coerced) == raw)
+        // INT64_MAX rounds up to 2^63 as a double, so the upper bound must be exclusive.
+        if (std::isfinite(raw) && std::trunc(raw) == raw && raw >= -0x1p63 && raw < 0x1p63)
         {
-            return coerced;
+            return static_cast<std::int64_t>(raw);
         }
     }
 

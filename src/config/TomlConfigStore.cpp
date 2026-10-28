@@ -84,7 +84,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
 
         if (const infrastructure::documents::DocumentValue* port = server->find("port"))
         {
-            const int portValue = static_cast<int>(port->asInt());
+            const auto portValue = port->asInt();
             if (portValue < 1 || portValue > 65535)
             {
                 throw errors::config::Invalid("port out of range in " + path);
@@ -129,7 +129,7 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
 #ifdef APP_DATABASE_POSTGRESQL
         if (const infrastructure::documents::DocumentValue* port = database->find("port"))
         {
-            const int portValue = static_cast<int>(port->asInt());
+            const auto portValue = port->asInt();
             if (portValue < 1 || portValue > 65535)
             {
                 throw errors::config::Invalid("database.port out of range in " + path);

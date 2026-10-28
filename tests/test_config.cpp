@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -219,6 +220,134 @@ TEST_CASE("config: validation rejects bad values")
     s = validSettings();
     s.logLevel = "NOPE";
     EXPECT_FALSE(s.validate().empty());
+}
+
+TEST_CASE("config: all formats validate ports before narrowing")
+{
+    const char* groups[] = {
+        "server",
+#ifdef APP_DATABASE_POSTGRESQL
+        "database",
+#endif
+    };
+    const std::int64_t invalidPorts[] = {0,
+                                         -1,
+                                         65536,
+                                         4294975376LL,
+                                         -4294959216LL,
+                                         std::numeric_limits<std::int64_t>::min(),
+                                         std::numeric_limits<std::int64_t>::max()};
+
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("numeric-ports.conf");
+        for (const auto value : {1, 8080, 65535})
+        {
+            auto root = minimalConfig();
+            for (const char* group : groups)
+            {
+                root[group]["port"] = value;
+            }
+            writeConfig(format, path, root);
+            const auto loaded = format.store->load(path);
+            EXPECT_EQ(loaded.port, value);
+#ifdef APP_DATABASE_POSTGRESQL
+            EXPECT_EQ(loaded.databasePort, value);
+#endif
+        }
+
+        for (const char* group : groups)
+        {
+            for (const auto value : invalidPorts)
+            {
+                auto root = minimalConfig();
+                root[group]["port"] = value;
+                writeConfig(format, path, root);
+                expectConfigRejected(*format.store, path, "port");
+            }
+        }
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: numeric fields reject fractional and overflowing doubles")
+{
+    const char* groups[] = {
+        "server",
+        "jwt",
+#ifdef APP_DATABASE_POSTGRESQL
+        "database",
+#endif
+    };
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("numeric-doubles.conf");
+        for (const char* group : groups)
+        {
+            const char* field = std::string(group) == "jwt" ? "ttlSeconds" : "port";
+            for (const double value : {1.5, -1.5, 1e100, -1e100})
+            {
+                auto root = minimalConfig();
+                root[group][field] = value;
+                writeConfig(format, path, root);
+                if (format.xml)
+                {
+                    expectConfigRejected(*format.store, path, field);
+                }
+                else
+                {
+                    EXPECT_THROW_AS(format.store->load(path), errors::serialization::ParsingFailed);
+                }
+            }
+        }
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: XML numeric fields require complete numbers and allow surrounding whitespace")
+{
+    const char* groups[] = {
+        "server",
+        "jwt",
+#ifdef APP_DATABASE_POSTGRESQL
+        "database",
+#endif
+    };
+    for (auto& format : configFormats())
+    {
+        if (!format.xml)
+        {
+            continue;
+        }
+        const auto path = tmpPath("numeric-text.conf");
+        for (const char* group : groups)
+        {
+            const char* field = std::string(group) == "jwt" ? "ttlSeconds" : "port";
+            for (const char* text : {"8080junk", "8080.5", "8080 junk", "8080\n junk", "0x1f", "9223372036854775808",
+                                     "-9223372036854775809"})
+            {
+                auto root = minimalConfig();
+                root[group][field] = text;
+                writeConfig(format, path, root);
+                expectConfigRejected(*format.store, path, field);
+            }
+        }
+
+        auto root = minimalConfig();
+        root["server"]["port"] = " \t+8080 \r\n";
+        root["jwt"]["ttlSeconds"] = " \t+3600 \r\n";
+#ifdef APP_DATABASE_POSTGRESQL
+        root["database"]["port"] = " \t+5433 \r\n";
+#endif
+        writeConfig(format, path, root);
+        const auto loaded = format.store->load(path);
+        EXPECT_EQ(loaded.port, 8080);
+        EXPECT_EQ(loaded.jwtTtlSeconds, 3600);
+#ifdef APP_DATABASE_POSTGRESQL
+        EXPECT_EQ(loaded.databasePort, 5433);
+#endif
+        std::remove(path.c_str());
+    }
 }
 
 TEST_CASE("config: defaults carry the library swagger res path")

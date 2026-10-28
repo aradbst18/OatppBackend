@@ -1,6 +1,8 @@
 #include "support/TestRunner.hpp"
 
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 #include "support/TestDb.hpp"
@@ -98,6 +100,29 @@ TEST_CASE("generic: value core types and accessors")
     list.asList().push_back(infrastructure::documents::DocumentValue(static_cast<std::int64_t>(1)));
     EXPECT_TRUE(list.isList());
     EXPECT_EQ(list.size(), 1);
+}
+
+TEST_CASE("generic: integer conversion validates doubles before casting")
+{
+    using infrastructure::documents::DocumentValue;
+    const auto minimum = std::numeric_limits<std::int64_t>::min();
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    const auto infinity = std::numeric_limits<double>::infinity();
+
+    EXPECT_EQ(DocumentValue(minimum).asInt(), minimum);
+    EXPECT_EQ(DocumentValue(maximum).asInt(), maximum);
+    EXPECT_EQ(DocumentValue(8080.0).asInt(), 8080);
+    EXPECT_EQ(DocumentValue(-42.0).asInt(), -42);
+    EXPECT_EQ(DocumentValue(-0.0).asInt(), 0);
+    EXPECT_EQ(DocumentValue(-0x1p63).asInt(), minimum);
+    EXPECT_EQ(DocumentValue(std::nextafter(-0x1p63, 0.0)).asInt(), minimum + 1024);
+    EXPECT_EQ(DocumentValue(std::nextafter(0x1p63, 0.0)).asInt(), maximum - 1023);
+
+    for (const double value : {std::numeric_limits<double>::quiet_NaN(), infinity, -infinity, 1e100, -1e100, 1.5, -1.5,
+                               0x1p63, std::nextafter(0x1p63, infinity), std::nextafter(-0x1p63, -infinity)})
+    {
+        EXPECT_THROW_AS(DocumentValue(value).asInt(), errors::serialization::DeserializationFailed);
+    }
 }
 
 #ifdef APP_WITH_JSON_PARSER

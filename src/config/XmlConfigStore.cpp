@@ -108,7 +108,13 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
             {
                 try
                 {
-                    const int port = std::stoi(portText);
+                    std::size_t consumed = 0;
+                    const int port = std::stoi(portText, &consumed);
+                    if (portText.find_first_not_of(" \t\r\n", consumed) != std::string::npos)
+                    {
+                        throw errors::config::Invalid("Invalid <port> in " + path);
+                    }
+
                     if (port < 1 || port > 65535)
                     {
                         throw errors::config::Invalid("port out of range in " + path);
@@ -159,7 +165,13 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
             {
                 try
                 {
-                    const int portValue = std::stoi(dbPortText);
+                    std::size_t consumed = 0;
+                    const int portValue = std::stoi(dbPortText, &consumed);
+                    if (dbPortText.find_first_not_of(" \t\r\n", consumed) != std::string::npos)
+                    {
+                        throw errors::config::Invalid("Invalid <port> in <database> in " + path);
+                    }
+
                     if (portValue < 1 || portValue > 65535)
                     {
                         throw errors::config::Invalid("database.port out of range in " + path);
@@ -252,7 +264,14 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
             {
                 try
                 {
-                    s.jwtTtlSeconds = std::stoll(ttlText);
+                    std::size_t consumed = 0;
+                    const auto ttl = std::stoll(ttlText, &consumed);
+                    if (ttlText.find_first_not_of(" \t\r\n", consumed) != std::string::npos)
+                    {
+                        throw errors::config::Invalid("Invalid <ttlSeconds> in " + path);
+                    }
+
+                    s.jwtTtlSeconds = ttl;
                 }
                 catch (...)
                 {
