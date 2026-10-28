@@ -658,6 +658,58 @@ std::string tokenWithRole(const std::optional<std::string>& role, const auth::To
 
 }  // namespace
 
+TEST_CASE("api: login preserves NUL passwords after creation and password changes")
+{
+    auto srv = startServer();
+    const auto token = loginAndGetToken("127.0.0.1", srv->port);
+
+    for (const std::string method : {"POST", "PUT", "PATCH"})
+    {
+        const std::string password = "Valid123\\u0000" + method;
+        const std::string body = "{\"username\":\"nuluser\",\"password\":\"" + password + "\",\"role\":\"viewer\"}";
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, method, method == "POST" ? "/users" : "/users/nuluser",
+                                                 token, body)),
+                  method == "POST" ? 201 : 200);
+
+        const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", body);
+        EXPECT_EQ(statusOf(response), 200);
+        EXPECT_TRUE(bodyOf(response).find("access_token") != std::string::npos);
+
+        for (const char* wrongPassword : {"Valid123", R"(Valid123\u0000wrong)"})
+        {
+            const std::string wrongBody =
+                std::string(R"({"username":"nuluser","password":")") + wrongPassword + R"("})";
+            const auto rejected = userManagementRequest(srv->port, "POST", "/auth/login", "", wrongBody);
+            EXPECT_EQ(statusOf(rejected), 401);
+            EXPECT_EQ(bodyOf(rejected).find("access_token"), std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("api: login rejects NUL suffixes instead of authenticating their prefixes")
+{
+    auto srv = startServer();
+
+    for (const char* username : {R"(admin\u0000suffix)", R"(admin\u0000)"})
+    {
+        const std::string body = std::string(R"({"username":")") + username + R"(","password":"TestAdmin8391"})";
+        const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", body);
+        EXPECT_EQ(statusOf(response), 422);
+        EXPECT_EQ(bodyOf(response).find("access_token"), std::string::npos);
+    }
+
+    const auto wrongPassword = userManagementRequest(srv->port, "POST", "/auth/login", "",
+                                                     R"({"username":"admin","password":"TestAdmin8391\u0000suffix"})");
+    EXPECT_EQ(statusOf(wrongPassword), 401);
+    EXPECT_EQ(bodyOf(wrongPassword).find("access_token"), std::string::npos);
+
+    const std::string oversized =
+        std::string(R"({"username":"admin","password":"TestAdmin8391\u0000)") + std::string(48, 'x') + R"("})";
+    const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", oversized);
+    EXPECT_EQ(statusOf(response), 422);
+    EXPECT_EQ(bodyOf(response).find("access_token"), std::string::npos);
+}
+
 TEST_CASE("api: users allow viewer and operator reads but reject every write without changing data")
 {
     auto srv = startServer();

@@ -221,7 +221,8 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::login(const oa
         throw errors::request::Missing("username and password are required");
     }
 
-    const services::LoginResult result = authService_->login(body->username->c_str(), body->password->c_str());
+    const services::LoginResult result =
+        authService_->login(std::string(*body->username), std::string(*body->password));
 
     auto out = dto::LoginResponseDto::createShared();
     out->accessToken = oatpp::String(result.accessToken);
