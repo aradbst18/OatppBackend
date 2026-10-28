@@ -34,12 +34,24 @@ using namespace app;
 namespace
 {
 
-int connectTo(const std::string& host, int port)
+int connectTo(const std::string& host, int port, const std::string& sourceIp = {})
 {
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
     {
         return -1;
+    }
+
+    if (!sourceIp.empty())
+    {
+        sockaddr_in source{};
+        source.sin_family = AF_INET;
+        if (::inet_pton(AF_INET, sourceIp.c_str(), &source.sin_addr) != 1 ||
+            ::bind(fd, reinterpret_cast<sockaddr*>(&source), sizeof(source)) != 0)
+        {
+            ::close(fd);
+            return -1;
+        }
     }
 
     sockaddr_in addr{};
@@ -67,9 +79,10 @@ int connectTo(const std::string& host, int port)
     return fd;
 }
 
-std::string httpRoundTrip(const std::string& host, int port, const std::string& request)
+std::string httpRoundTrip(const std::string& host, int port, const std::string& request,
+                          const std::string& sourceIp = {})
 {
-    int fd = connectTo(host, port);
+    int fd = connectTo(host, port, sourceIp);
     if (fd < 0)
     {
         throw std::runtime_error("cannot connect to test server");
@@ -202,14 +215,16 @@ struct TestServer
     }
 };
 
-std::unique_ptr<TestServer> startServer()
+std::unique_ptr<TestServer> startServer(const std::string& trustedProxies = {})
 {
     for (int port = 18081; port < 18100; ++port)
     {
         auto srv = std::make_unique<TestServer>();
         try
         {
-            srv->app = std::make_unique<application::Application>(testSettings(port));
+            auto settings = testSettings(port);
+            settings.trustedProxies = trustedProxies;
+            srv->app = std::make_unique<application::Application>(settings);
             srv->app->initialize();
         }
         catch (...)
@@ -224,16 +239,23 @@ std::unique_ptr<TestServer> startServer()
                 a->run();
             });
 
-        // Wait for readiness (up to ~3s).
+        // The listener is bound by initialize(), before the server thread enters run().
+        // Wait for an HTTP response so immediate-stop tests cannot race server startup.
         bool ready = false;
         for (int i = 0; i < 60; ++i)
         {
-            int fd = connectTo("127.0.0.1", port);
-            if (fd >= 0)
+            try
             {
-                ::close(fd);
-                ready = true;
-                break;
+                const auto response = httpRoundTrip(
+                    "127.0.0.1", port, "GET /auth/who-am-i HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+                if (statusOf(response) == 401)
+                {
+                    ready = true;
+                    break;
+                }
+            }
+            catch (const std::exception&)
+            {
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -481,6 +503,49 @@ TEST_CASE("api: rate limiter blocks requests exceeding threshold with 429")
     const std::string blockedResp = httpRoundTrip("127.0.0.1", srv->port, req);
     EXPECT_EQ(statusOf(blockedResp), 429);
     EXPECT_TRUE(bodyOf(blockedResp).find("Rate limit exceeded") != std::string::npos);
+}
+
+TEST_CASE("api: rate limiter header rotation cannot bypass quotas and direct peers are independent")
+{
+    auto srv = startServer();
+    const std::string payload = R"({"username":"admin","password":"WrongPassword123"})";
+    auto login = [&payload](const std::string& headers)
+    {
+        return "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" + headers +
+               "Content-Length: " + std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;
+    };
+    // Each call reconnects with a different source port; the peer IP retains its quota.
+    for (int i = 0; i < 10; ++i)
+    {
+        const auto request = login("X-Forwarded-For: 198.51.100." + std::to_string(i + 1) +
+                                   "\r\nX-Real-IP: 203.0.113." + std::to_string(i + 1) + "\r\n");
+        EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, request, "127.0.0.2")), 401);
+    }
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login(""), "127.0.0.2")), 429);
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login(""), "127.0.0.3")), 401);
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port,
+                                     login("X-Forwarded-For: 192.0.2.99\r\nX-Real-IP: 192.0.2.98\r\n"), "127.0.0.2")),
+              429);
+}
+
+TEST_CASE("api: rate limiter trusts configured proxies and ignores spoofed chain prefixes")
+{
+    auto srv = startServer("127.0.0.2, 192.0.2.10");
+    const std::string payload = R"({"username":"admin","password":"WrongPassword123"})";
+    auto login = [&payload](const std::string& forwardedFor)
+    {
+        return "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nX-Forwarded-For: " +
+               forwardedFor + "\r\nContent-Length: " + std::to_string(payload.size()) +
+               "\r\nConnection: close\r\n\r\n" + payload;
+    };
+    for (int i = 0; i < 10; ++i)
+    {
+        const auto request = login("203.0.113." + std::to_string(i + 1) + ", 198.51.100.7, 192.0.2.10");
+        EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, request, "127.0.0.2")), 401);
+    }
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login("198.51.100.7, 192.0.2.10"), "127.0.0.2")), 429);
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login("198.51.100.8, 192.0.2.10"), "127.0.0.2")), 401);
+    EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login("invalid"), "127.0.0.2")), 429);
 }
 
 TEST_CASE("api: cors preflight OPTIONS returns 204 with headers")

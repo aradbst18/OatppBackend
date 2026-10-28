@@ -63,6 +63,15 @@ AppSettings fromValue(const infrastructure::documents::DocumentValue& root, cons
 
     if (const infrastructure::documents::DocumentValue* server = requireGroup(root, "server", source))
     {
+        if (const auto* proxies = server->find("trustedProxies"))
+        {
+            if (!proxies->isString())
+            {
+                throw errors::config::Invalid("server.trustedProxies must be a string in " + source);
+            }
+            s.trustedProxies = proxies->asString();
+        }
+
         if (const infrastructure::documents::DocumentValue* host = server->find("host"))
         {
             if (host->isString())
@@ -394,6 +403,7 @@ void JsonConfigStore::save(const std::string& path, const AppSettings& settings,
 
     infrastructure::documents::DocumentValue server = infrastructure::documents::DocumentValue::makeMap();
     server["host"] = settings.host;
+    server["trustedProxies"] = settings.trustedProxies;
     server["port"] = static_cast<std::int64_t>(settings.port);
 
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();

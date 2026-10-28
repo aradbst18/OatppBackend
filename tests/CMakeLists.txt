@@ -8,6 +8,7 @@ add_executable(
     test_database.cpp
     test_pg_test_db.cpp
     test_api.cpp
+    test_rate_limit.cpp
     test_websocket.cpp
     test_lifecycle.cpp
     test_features.cpp
@@ -33,6 +34,7 @@ set(TEST_SUITES
     "auth"
     "database"
     "api"
+    "rate_limit"
     "websocket"
     "lifecycle"
     "features"

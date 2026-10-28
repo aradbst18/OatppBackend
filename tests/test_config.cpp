@@ -152,6 +152,49 @@ struct ScopedUmask
 
 }  // namespace
 
+TEST_CASE("config: all formats default to no trusted proxies and round trip explicit trust")
+{
+    EXPECT_TRUE(config::AppSettings::defaults().trustedProxies.empty());
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("trusted-proxies.conf");
+        auto root = minimalConfig();
+        writeConfig(format, path, root);
+        EXPECT_TRUE(format.store->load(path).trustedProxies.empty());
+
+        auto settings = validSettings();
+        settings.trustedProxies = "192.0.2.10, 2001:db8::10";
+        format.store->save(path, settings);
+        EXPECT_EQ(format.store->load(path).trustedProxies, settings.trustedProxies);
+        settings.trustedProxies = "";
+        format.store->save(path, settings);
+        EXPECT_TRUE(format.store->load(path).trustedProxies.empty());
+    }
+}
+
+TEST_CASE("config: all formats reject invalid proxy trust on load and save")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("invalid-trusted-proxies.conf");
+        for (const auto* invalid : {"*", "localhost", "192.0.2.0/24", "192.0.2.10,", "192.0.2.10, "})
+        {
+            auto root = minimalConfig();
+            root["server"]["trustedProxies"] = invalid;
+            writeConfig(format, path, root);
+            expectConfigRejected(*format.store, path, "server.trustedProxies");
+            auto settings = validSettings();
+            settings.trustedProxies = invalid;
+            EXPECT_THROW_AS(format.store->save(path, settings), errors::config::Invalid);
+        }
+        auto root = minimalConfig();
+        root["server"]["trustedProxies"] = DocumentValue::makeMap();
+        root["server"]["trustedProxies"]["bad"] = "192.0.2.10";
+        writeConfig(format, path, root);
+        expectConfigRejected(*format.store, path, "server.trustedProxies");
+    }
+}
+
 TEST_CASE("config: defaults contain no secrets and require explicit configuration")
 {
     const auto defaults = config::AppSettings::defaults();

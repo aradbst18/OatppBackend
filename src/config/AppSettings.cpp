@@ -1,5 +1,8 @@
 #include "app/config/AppSettings.hpp"
 
+#include <stdexcept>
+
+#include "app/infrastructure/ClientIpResolver.hpp"
 #include "app/logging/Logger.hpp"
 
 namespace app::config
@@ -52,6 +55,15 @@ AppSettings AppSettings::defaults()
 
 std::string AppSettings::validate() const
 {
+    try
+    {
+        infrastructure::ClientIpResolver resolver(trustedProxies);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        return error.what();
+    }
+
     if (host.empty())
     {
         return "host must not be empty";

@@ -108,6 +108,15 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
 
         if (const infrastructure::documents::DocumentValue* server = requireGroup(root, "server", path))
         {
+            if (const auto* proxies = server->find("trustedProxies"))
+            {
+                if (!proxies->isString())
+                {
+                    throw errors::config::Invalid("server.trustedProxies must be a string in " + path);
+                }
+                s.trustedProxies = proxies->asString();
+            }
+
             if (!server->contains("host"))
             {
                 noteMissing("server", "host");
@@ -330,6 +339,7 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings,
 
     infrastructure::documents::DocumentValue server = infrastructure::documents::DocumentValue::makeMap();
     server["host"] = settings.host;
+    server["trustedProxies"] = settings.trustedProxies;
     server["port"] = static_cast<std::int64_t>(settings.port);
 
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();

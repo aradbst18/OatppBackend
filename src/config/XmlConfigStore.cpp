@@ -82,6 +82,15 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
                 throw errors::config::Invalid("Invalid <server> group in " + path);
             }
 
+            if (const auto* proxies = server->find("trustedProxies"))
+            {
+                if (!proxies->isString())
+                {
+                    throw errors::config::Invalid("server.trustedProxies must be a string in " + path);
+                }
+                s.trustedProxies = proxies->asString();
+            }
+
             if (!server->contains("host"))
             {
                 noteMissing("server", "host");
@@ -343,6 +352,7 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings, 
 
     infrastructure::documents::DocumentValue server = infrastructure::documents::DocumentValue::makeMap();
     server["host"] = settings.host;
+    server["trustedProxies"] = settings.trustedProxies;
     server["port"] = std::to_string(settings.port);
 
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();

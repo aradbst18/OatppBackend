@@ -36,7 +36,7 @@ never linked. Selecting a format whose parser is disabled is a configure-time
 
 ```json
 {
-  "server": {"host": "127.0.0.1", "port": 8080},
+  "server": {"host": "127.0.0.1", "port": 8080, "trustedProxies": ""},
   "database": {"path": "data/postgresql", "key": "REPLACE_ME", "port": 5433, "name": "oatpp_backend",
                "user": "oatpp_tester"},
   "jwt": {"secret": "REPLACE_ME", "issuer": "oatpp-backend", "ttlSeconds": 3600},
@@ -49,7 +49,7 @@ The `REPLACE_ME` values above are placeholders and are rejected at startup.
 Use generated secrets for a new installation, or the matching private database
 key/password and a unique JWT secret for an existing installation.
 
-Leaf mapping: `host`/`port`, `database.path` (`databasePath`: file path
+Leaf mapping: `host`/`port`/`trustedProxies`, `database.path` (`databasePath`: file path
 for SQLCIPHER, e.g. `data/app.db`, or Unix socket dir for
 POSTGRESQL, e.g. `data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
 `database.key` (`databaseKey`: SQLCipher encryption key or PostgreSQL
@@ -130,6 +130,38 @@ If our cluster is missing/stopped but TCP `127.0.0.1:<port>` already answers
 path), startup fails with `Port <port> is already in use by another
 PostgreSQL server; cannot initialize/start database at '<pgdata>' there`
 and terminates; a server matching our path/port proceeds normally.
+
+## Rate limiting and reverse proxies
+
+`POST /auth/login` and `POST /auth/refresh` each allow 10 requests per client IP
+in a sliding 60-second window, per application process. The accepted connection's
+peer IP identifies direct clients; source ports and forwarding headers do not
+create new quotas. IPv4-mapped IPv6 addresses normalize to IPv4.
+
+`server.trustedProxies` is an optional comma-separated string of **literal IP
+addresses**, for example `"192.0.2.10, 2001:db8::10"`. Its default is empty:
+no proxy is trusted, including loopback. Hostnames, wildcards and CIDRs are
+rejected. Existing configurations without the setting keep this default.
+
+Only a connection from an allowlisted peer may supply `X-Forwarded-For`.
+The chain is parsed from right to left, skipping allowlisted proxies until
+the first untrusted address. Caller-supplied prefixes cannot override that
+address. Configure each trusted proxy to overwrite incoming forwarding headers
+or correctly append the actual peer IP; list only proxies under your control.
+`X-Real-IP` and `Forwarded` are ignored. Without `X-Forwarded-For`, the proxy's
+own IP is used, so its clients share a quota.
+
+Trusted forwarding chains are limited to 4096 bytes and 32 IPs. Empty,
+duplicate, malformed or oversized headers from trusted proxies, and requests
+without usable transport peer metadata, receive HTTP 429 on protected routes.
+Untrusted peers' forwarding data is ignored.
+
+The limiter stores at most 10,000 endpoint/IP buckets. At capacity, new buckets
+receive HTTP 429 while existing buckets retain their quotas. Each request
+expires at most 16 old buckets, ordered by their last accepted request; active
+buckets are never evicted to admit a new identity. Each bucket retains at most
+10 timestamps. These bounds are constructor options for embedded C++ callers;
+they are not runtime file settings. Limits are local to each server process.
 
 ## Settings completeness
 

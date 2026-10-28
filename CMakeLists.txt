@@ -38,6 +38,7 @@ add_library(
     src/domain/UserRole.cpp
     src/dto/UserDtos.cpp
     src/infrastructure/TextFile.cpp
+    src/infrastructure/ClientIpResolver.cpp
     src/infrastructure/documents/DocumentValue.cpp
     src/config/AppSettings.cpp
     src/config/VersionFile.cpp

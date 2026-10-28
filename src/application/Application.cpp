@@ -286,12 +286,14 @@ void Application::initRouting()
     httpHandler_->addRequestInterceptor(cors);
     httpHandler_->addResponseInterceptor(cors);
 
-    httpHandler_->addRequestInterceptor(std::make_shared<middlewares::RateLimitInterceptor>());
+    middlewares::RateLimitInterceptor::Options rateLimitOptions;
+    rateLimitOptions.trustedProxies = settings_.trustedProxies;
+    httpHandler_->addRequestInterceptor(std::make_shared<middlewares::RateLimitInterceptor>(rateLimitOptions));
     httpHandler_->addRequestInterceptor(std::make_shared<middlewares::AuthInterceptor>(auth_));
 
     // Connection provider is created here but the blocking Server runs in run().
     connectionProvider_ = oatpp::network::tcp::server::ConnectionProvider::createShared(
-        {settings_.host.c_str(), static_cast<v_uint16>(settings_.port), oatpp::network::Address::IP_4});
+        {settings_.host.c_str(), static_cast<v_uint16>(settings_.port), oatpp::network::Address::IP_4}, true);
 
     server_ = std::make_shared<oatpp::network::Server>(connectionProvider_, httpHandler_);
 

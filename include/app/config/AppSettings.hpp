@@ -15,6 +15,9 @@ struct AppSettings
     std::string host = "127.0.0.1";
     std::uint16_t port = 8080;
 
+    /// Comma-separated literal proxy IPs allowed to supply X-Forwarded-For. Empty trusts none.
+    std::string trustedProxies;
+
     /// Unified database location:
     /// - SQLCIPHER: filesystem path of the database file (e.g. "data/app.db", ":memory:" in tests).
     /// - POSTGRESQL: Unix socket directory of the local server (e.g. "data/postgresql", see docs/postgresql.md).

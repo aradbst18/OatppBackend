@@ -3,6 +3,7 @@
     <server>
         <host>127.0.0.1</host>
         <port>8080</port>
+        <trustedProxies></trustedProxies>
     </server>
     <database>
         <path>data/postgresql</path>
