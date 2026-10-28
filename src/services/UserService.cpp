@@ -122,11 +122,13 @@ std::vector<UserInfo> UserService::createUsers(const std::vector<CreateUserInput
     std::vector<UserInfo> created;
     created.reserve(inputs.size());
 
+    auto transaction = users_->beginTransaction();
     for (const auto& input : inputs)
     {
         created.push_back(createUser(input));
     }
 
+    transaction.commit();
     return created;
 }
 

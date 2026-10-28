@@ -926,6 +926,27 @@ TEST_CASE("api: users add - single user and batch list")
     EXPECT_EQ(statusOf(getBobResp), 200);
 }
 
+TEST_CASE("api: failed user batches leave no accounts through either endpoint")
+{
+    auto srv = startServer();
+    const std::string token = getAdminToken(srv->port);
+    EXPECT_FALSE(token.empty());
+    const std::string payload =
+        R"([{"username":"batchnew","password":"BatchPassword1","role":"viewer"},{"username":"admin","password":"OtherPassword1","role":"operator"}])";
+    for (const std::string path : {"/users", "/users/batch"})
+    {
+        const std::string request =
+            "POST " + path + " HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+            "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(payload.size()) +
+            "\r\nConnection: close\r\n\r\n" + payload;
+        EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, request)), 409);
+
+        const std::string getRequest = "GET /users/batchnew HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+                                       "\r\nConnection: close\r\n\r\n";
+        EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, getRequest)), 404);
+    }
+}
+
 TEST_CASE("api: users update - full update and patch")
 {
     // Arrange

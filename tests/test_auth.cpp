@@ -518,6 +518,82 @@ TEST_CASE("auth: bulk deletion removes sessions while preserving the administrat
     EXPECT_FALSE(fixture.service->refresh(admin.refreshToken).accessToken.empty());
 }
 
+TEST_CASE("auth: user batch conflicts roll back earlier creations")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto original = fixture.users->getUser("alice");
+
+    EXPECT_THROW_AS(users.createUsers({{"bobby", "BobPass123", "operator"}, {"alice", "Replacement456", "admin"}}),
+                    errors::database::Conflict);
+
+    EXPECT_FALSE(fixture.users->isUserExists("bobby"));
+    EXPECT_EQ(fixture.users->listUsers()->size(), 1U);
+    const auto unchanged = fixture.users->getUser("alice");
+    EXPECT_EQ(*unchanged->id, *original->id);
+    EXPECT_EQ(*unchanged->passwordHash, *original->passwordHash);
+    EXPECT_EQ(*unchanged->role, *original->role);
+    EXPECT_EQ(unchanged->sessionVersion.getValue(-1), original->sessionVersion.getValue(-1));
+}
+
+TEST_CASE("auth: user batch repeated usernames leave no accounts")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    EXPECT_THROW_AS(users.createUsers({{"alice", "AlicePass123", "viewer"}, {"alice", "Replacement456", "admin"}}),
+                    errors::database::Conflict);
+    EXPECT_TRUE(fixture.users->listUsers()->empty());
+}
+
+TEST_CASE("auth: user batch validates every input before creating accounts")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    EXPECT_THROW_AS(users.createUsers({}), errors::validation::InvalidValue);
+    EXPECT_THROW_AS(users.createUsers({{"alice", "AlicePass123", "viewer"}, {"bobby", "short", "operator"}}),
+                    errors::validation::InvalidValue);
+    EXPECT_TRUE(fixture.users->listUsers()->empty());
+}
+
+TEST_CASE("auth: user batch database failure rolls back earlier inserts and permits retry")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    const std::vector<services::CreateUserInput> inputs = {{"alice", "AlicePass123", "viewer"},
+                                                           {"bobby", "BobPass123", "operator"}};
+    if (fixture.db->backendName() == "POSTGRESQL")
+    {
+        fixture.db->executeVoid(
+            "CREATE FUNCTION reject_user_insert() RETURNS trigger LANGUAGE plpgsql "
+            "AS 'BEGIN RAISE EXCEPTION ''forced insert failure''; END';");
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_user_insert BEFORE INSERT ON users "
+            "FOR EACH ROW WHEN (NEW.username = 'bobby') EXECUTE FUNCTION reject_user_insert();");
+    }
+    else
+    {
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_user_insert BEFORE INSERT ON users WHEN NEW.username = 'bobby' "
+            "BEGIN SELECT RAISE(ABORT, 'forced insert failure'); END;");
+    }
+
+    EXPECT_THROW_AS(users.createUsers(inputs), errors::database::QueryFailed);
+    EXPECT_TRUE(fixture.users->listUsers()->empty());
+
+    fixture.db->executeVoid(fixture.db->backendName() == "POSTGRESQL" ? "DROP TRIGGER reject_user_insert ON users;"
+                                                                      : "DROP TRIGGER reject_user_insert;");
+    const auto created = users.createUsers(inputs);
+    EXPECT_EQ(created.size(), inputs.size());
+    EXPECT_EQ(fixture.users->listUsers()->size(), inputs.size());
+    for (std::size_t i = 0; i < inputs.size(); ++i)
+    {
+        EXPECT_EQ(created[i].username, inputs[i].username);
+        EXPECT_EQ(created[i].role, inputs[i].role);
+        EXPECT_EQ(fixture.service->login(inputs[i].username, inputs[i].password).role, inputs[i].role);
+    }
+}
+
 TEST_CASE("auth: invalid and rolled back account changes preserve existing sessions")
 {
     AuthFixture fixture;
@@ -527,6 +603,9 @@ TEST_CASE("auth: invalid and rolled back account changes preserve existing sessi
     services::PatchUserInput patch;
     patch.username = "alicia";
     patch.role = "invalid";
+    EXPECT_THROW_AS(users.patchUser("alice", patch), errors::validation::InvalidValue);
+    patch.role = "admin";
+    patch.password = "short";
     EXPECT_THROW_AS(users.patchUser("alice", patch), errors::validation::InvalidValue);
     EXPECT_TRUE(fixture.users->isUserExists("alice"));
     EXPECT_FALSE(fixture.users->isUserExists("alicia"));
@@ -538,6 +617,52 @@ TEST_CASE("auth: invalid and rolled back account changes preserve existing sessi
     }
     EXPECT_EQ(fixture.service->authenticate(login.accessToken).role, std::string("viewer"));
     EXPECT_FALSE(fixture.service->refresh(login.refreshToken).accessToken.empty());
+}
+
+TEST_CASE("auth: failed user patch rolls back account fields and session invalidation")
+{
+    AuthFixture fixture;
+    services::UserService users(fixture.users);
+    users.createUser({"alice", "AlicePass123", "viewer"});
+    const auto original = fixture.users->getUser("alice");
+    const auto login = fixture.service->login("alice", "AlicePass123");
+    if (fixture.db->backendName() == "POSTGRESQL")
+    {
+        fixture.db->executeVoid(
+            "CREATE FUNCTION reject_user_update() RETURNS trigger LANGUAGE plpgsql "
+            "AS 'BEGIN RAISE EXCEPTION ''forced update failure''; END';");
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_user_update AFTER UPDATE ON users "
+            "FOR EACH ROW WHEN (NEW.username = 'alicia') EXECUTE FUNCTION reject_user_update();");
+    }
+    else
+    {
+        // FAIL leaves the UPDATE's changes in place until the service rolls back.
+        fixture.db->executeVoid(
+            "CREATE TRIGGER reject_user_update AFTER UPDATE ON users WHEN NEW.username = 'alicia' "
+            "BEGIN SELECT RAISE(FAIL, 'forced update failure'); END;");
+    }
+
+    services::PatchUserInput patch;
+    patch.username = "alicia";
+    patch.password = "ChangedPass456";
+    patch.role = "admin";
+    EXPECT_THROW_AS(users.patchUser("alice", patch), errors::database::QueryFailed);
+
+    const auto unchanged = fixture.users->getUser("alice");
+    EXPECT_FALSE(fixture.users->isUserExists("alicia"));
+    EXPECT_EQ(*unchanged->id, *original->id);
+    EXPECT_EQ(*unchanged->username, *original->username);
+    EXPECT_EQ(*unchanged->passwordHash, *original->passwordHash);
+    EXPECT_EQ(*unchanged->role, *original->role);
+    EXPECT_EQ(unchanged->sessionVersion.getValue(-1), original->sessionVersion.getValue(-1));
+    EXPECT_EQ(fixture.service->authenticate(login.accessToken).role, std::string("viewer"));
+    EXPECT_FALSE(fixture.service->refresh(login.refreshToken).accessToken.empty());
+
+    fixture.db->executeVoid(fixture.db->backendName() == "POSTGRESQL" ? "DROP TRIGGER reject_user_update ON users;"
+                                                                      : "DROP TRIGGER reject_user_update;");
+    EXPECT_EQ(users.patchUser("alice", patch).username, std::string("alicia"));
+    EXPECT_EQ(fixture.service->login("alicia", "ChangedPass456").role, std::string("admin"));
 }
 
 TEST_CASE("auth: legacy access tokens without a session version are rejected")

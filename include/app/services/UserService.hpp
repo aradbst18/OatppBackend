@@ -90,7 +90,8 @@ public:
     /// Throws errors::database::Conflict if username already exists.
     UserInfo createUser(const CreateUserInput& input);
 
-    /// Create multiple users in order.
+    /// Create multiple users atomically, returning them in input order.
+    /// Any failure rolls back all users created by this call.
     /// Throws errors::validation::InvalidValue if any user input is invalid.
     /// Throws errors::database::Conflict if any username already exists.
     std::vector<UserInfo> createUsers(const std::vector<CreateUserInput>& inputs);
