@@ -38,7 +38,7 @@ public:
     /// Revokes all refresh tokens for an immutable account ID.
     void revokeAllForUser(const oatpp::String& userId);
 
-    /// Deletes all expired tokens prior to `nowTimestamp`.
+    /// Deletes at most 1000 oldest tokens expiring at or before `nowTimestamp`.
     void deleteExpired(oatpp::Int64 nowTimestamp);
 
 private:
@@ -50,6 +50,9 @@ private:
                               "expires_at BIGINT NOT NULL, revoked INTEGER NOT NULL)")
 
     QUERY(createUserIndexImp, "CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON refresh_tokens(user_id);")
+
+    QUERY(createExpiryIndexImp,
+          "CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at_idx ON refresh_tokens(expires_at);")
 
     QUERY(insertTokenImp,
           "INSERT INTO " + tableName() +
@@ -67,7 +70,10 @@ private:
     QUERY(revokeAllForUserImp, "UPDATE " + tableName() + " SET revoked = 1 WHERE user_id = :userId;",
           PARAM(oatpp::String, userId))
 
-    QUERY(deleteExpiredImp, "DELETE FROM " + tableName() + " WHERE expires_at < :now;", PARAM(oatpp::Int64, now))
+    QUERY(deleteExpiredImp,
+          "DELETE FROM " + tableName() + " WHERE token IN (SELECT token FROM " + tableName() +
+              " WHERE expires_at <= :now ORDER BY expires_at LIMIT 1000);",
+          PARAM(oatpp::Int64, now))
 };
 
 }  // namespace app::repositories

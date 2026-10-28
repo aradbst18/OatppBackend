@@ -106,6 +106,21 @@ response shape with a new access token and a replacement refresh token.
 The previous refresh token cannot be reused. Expired, revoked, deleted-account,
 or outdated-session tokens return 401; an empty token returns 400.
 
+The application removes expired refresh-token rows in a background worker: one
+pass after initialization, then one pass per minute, with at most 1,000 of the
+oldest expired rows deleted per pass. An expiry index is added to new and existing
+databases at startup. Both active and revoked rows remain until their original
+expiry; no additional audit retention is applied. A deleted token still returns
+401, reported as invalid rather than expired.
+
+Cleanup runs separately from login and rotation transactions. Failed passes are
+logged and retried on the next interval. PostgreSQL cleanup statements time out
+after five seconds; SQLCipher uses its existing five-second busy timeout. Shutdown
+wakes and joins the worker before closing the database. If expired rows arrive
+faster than 1,000 per minute per instance, cleanup capacity must be increased.
+Deleting rows permits database space reuse; it does not guarantee that the database
+file immediately shrinks.
+
 ### GET /auth/who-am-i (authenticated)
 
 Requires `Authorization: Bearer <jwt>`. Missing/malformed/expired/invalid ->

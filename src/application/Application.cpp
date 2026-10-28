@@ -108,6 +108,7 @@ void Application::initialize()
         initDatabase();
         initServices();
         initRouting();
+        startTokenCleanup();
         initialized_ = true;
     }
     catch (...)
@@ -314,6 +315,42 @@ void Application::initRouting()
     logging::logInfo("app", "Routing initialized on " + settings_.host + ":" + std::to_string(settings_.port));
 }
 
+void Application::startTokenCleanup()
+{
+    tokenCleanup_ = std::make_unique<ManagedThread>(
+        "refresh-token-cleanup",
+        [this](const std::atomic<bool>& stopRequested)
+        {
+            while (!stopRequested.load())
+            {
+                try
+                {
+                    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                                         std::chrono::system_clock::now().time_since_epoch())
+                                         .count();
+                    refreshTokens_->deleteExpired(now);
+                }
+                catch (const std::exception& ex)
+                {
+                    logging::logError("auth", std::string("Refresh token cleanup failed: ") + ex.what());
+                }
+                catch (...)
+                {
+                    logging::logError("auth", "Refresh token cleanup failed: unknown error");
+                }
+
+                std::unique_lock<std::mutex> lock(tokenCleanupMutex_);
+                // shortcut: 1000 rows/minute per instance; increase throughput if expired history accumulates.
+                tokenCleanupWake_.wait_for(lock, std::chrono::minutes(1),
+                                           [&stopRequested]
+                                           {
+                                               return stopRequested.load();
+                                           });
+            }
+        });
+    tokenCleanup_->start();
+}
+
 void Application::run()
 {
     initialize();
@@ -355,6 +392,16 @@ void Application::stop()
         catch (...)
         {
         }
+    }
+
+    if (tokenCleanup_)
+    {
+        {
+            std::lock_guard<std::mutex> cleanupLock(tokenCleanupMutex_);
+            tokenCleanup_->requestStop();
+        }
+        tokenCleanupWake_.notify_all();
+        tokenCleanup_->join();
     }
 
     if (database_)

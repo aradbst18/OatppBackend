@@ -1,12 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include "app/application/ManagedThread.hpp"
 #include "app/auth/JwtService.hpp"
 #include "app/config/AppSettings.hpp"
 #include "app/infrastructure/database/IDatabase.hpp"
@@ -51,10 +53,9 @@ namespace app::application
  * binding sockets (configure + initDatabase + initServices only). main()
  * only parses argv and calls run(); no business logic lives there.
  *
- * Threading: the HTTP server runs on the caller's thread via run(); an
- * optional background worker (ManagedThread) demonstrates owned-thread
- * semantics. Shutdown is cooperative: stop() halts the server connection
- * provider and joins the worker.
+ * Threading: the HTTP server runs on the caller's thread via run(). A
+ * ManagedThread removes expired refresh tokens in bounded periodic batches.
+ * Shutdown joins the worker before closing the database.
  */
 class Application
 {
@@ -99,6 +100,7 @@ private:
     void initDatabase();
     void initServices();
     void initRouting();
+    void startTokenCleanup();
 
     config::AppSettings settings_;
     std::mutex lifecycleMutex_;
@@ -118,6 +120,10 @@ private:
     std::shared_ptr<auth::JwtService> jwt_;
     std::shared_ptr<services::AuthService> auth_;
     std::shared_ptr<services::UserService> userService_;
+
+    std::mutex tokenCleanupMutex_;
+    std::condition_variable tokenCleanupWake_;
+    std::unique_ptr<ManagedThread> tokenCleanup_;
 };
 
 /// Operational startup sequence (see docs/configuration.md):

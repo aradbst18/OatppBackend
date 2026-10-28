@@ -86,8 +86,9 @@ configure (ensureConfigExists -> loadSettings; pre-logging failures go to
      file: data dir check -> open (create when missing); both -> ensureSchema)
   -> initServices (JwtService, AuthService + seed admin when absent)
   -> initRouting (router, controllers, swagger?, zlib encoders?, interceptors)
+  -> startTokenCleanup (immediate pass, then at most 1,000 expired rows per minute)
   -> run (blocking oatpp Server)
-  -> stop (server->stop, provider->stop, db->close; idempotent)
+  -> stop (server->stop, provider->stop, cleanup stop/join, db->close; idempotent)
 ```
 
 `main()` only parses `--config/--help`, installs the terminate handler, and

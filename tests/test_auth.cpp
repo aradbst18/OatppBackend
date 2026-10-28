@@ -692,6 +692,15 @@ TEST_CASE("auth: concurrent refresh requests consume the token exactly once")
     std::atomic<int> rejected{0};
     std::exception_ptr firstError;
     std::exception_ptr secondError;
+    std::exception_ptr cleanupError;
+    auto expired = repositories::RefreshTokenDto::createShared();
+    const auto account = fixture.users->getUser("alice");
+    expired->token = "expired-history";
+    expired->userId = account->id;
+    expired->sessionVersion = account->sessionVersion;
+    expired->expiresAt = 1;
+    expired->revoked = 1;
+    fixture.tokens->createToken(expired);
     auto work = [&](std::exception_ptr& error)
     {
         ready.wait();
@@ -719,17 +728,35 @@ TEST_CASE("auth: concurrent refresh requests consume the token exactly once")
                                       {
                                           work(secondError);
                                       });
+    application::ManagedThread cleanup("refresh-cleanup",
+                                       [&](const std::atomic<bool>&)
+                                       {
+                                           ready.wait();
+                                           try
+                                           {
+                                               fixture.tokens->deleteExpired(1);
+                                           }
+                                           catch (...)
+                                           {
+                                               cleanupError = std::current_exception();
+                                           }
+                                       });
     first.start();
     second.start();
+    cleanup.start();
     start.set_value();
     first.join();
     second.join();
+    cleanup.join();
     if (firstError)
         std::rethrow_exception(firstError);
     if (secondError)
         std::rethrow_exception(secondError);
+    if (cleanupError)
+        std::rethrow_exception(cleanupError);
     EXPECT_EQ(succeeded.load(), 1);
     EXPECT_EQ(rejected.load(), 1);
+    EXPECT_THROW_AS(fixture.tokens->getToken("expired-history"), errors::database::RecordNotFound);
 }
 
 TEST_CASE("auth: failed refresh replacement rolls back consumption of the original token")

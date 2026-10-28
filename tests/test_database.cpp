@@ -1,6 +1,8 @@
 #include "support/TestRunner.hpp"
 
+#include <chrono>
 #include <cstdio>
+#include <future>
 
 #include "support/TestDb.hpp"
 
@@ -255,6 +257,131 @@ TEST_CASE("database: legacy account migration preserves credentials and discards
     users.deleteUser("alice");
     EXPECT_THROW_AS(tokens.getToken("new-token"), errors::database::RecordNotFound);
 }
+
+TEST_CASE("database: refresh cleanup preserves unexpired tokens and includes the expiry boundary")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    repositories::UserRepository users(db);
+    repositories::RefreshTokenRepository tokens(db);
+    users.ensureSchema();
+    tokens.ensureSchema();
+    tests::seedUser(users, "alice", "viewer");
+    const auto user = users.getUser("alice");
+    struct TokenCase
+    {
+        const char* name;
+        v_int64 expiresAt;
+        v_int32 revoked;
+    };
+    for (const auto& item : {TokenCase{"active", 1001, 0}, TokenCase{"revoked", 1001, 1}, TokenCase{"expired", 999, 1},
+                             TokenCase{"boundary", 1000, 0}})
+    {
+        auto token = repositories::RefreshTokenDto::createShared();
+        token->token = item.name;
+        token->userId = user->id;
+        token->sessionVersion = user->sessionVersion;
+        token->expiresAt = item.expiresAt;
+        token->revoked = item.revoked;
+        tokens.createToken(token);
+    }
+
+    tokens.deleteExpired(1000);
+    EXPECT_THROW_AS(tokens.getToken("expired"), errors::database::RecordNotFound);
+    EXPECT_THROW_AS(tokens.getToken("boundary"), errors::database::RecordNotFound);
+    EXPECT_EQ(tokens.getToken("active")->expiresAt.getValue(0), 1001);
+    EXPECT_EQ(tokens.getToken("revoked")->revoked.getValue(0), 1);
+    db->executeVoid("DROP INDEX refresh_tokens_expires_at_idx;");
+    tokens.ensureSchema();
+    tokens.ensureSchema();
+    const auto indexes = db->backendName() == "POSTGRESQL"
+                             ? db->execute(
+                                   "SELECT CAST(indexname AS TEXT) FROM pg_indexes WHERE tablename = 'refresh_tokens' "
+                                   "AND indexname = 'refresh_tokens_expires_at_idx';")
+                             : db->execute(
+                                   "SELECT name FROM sqlite_master WHERE type = 'index' "
+                                   "AND name = 'refresh_tokens_expires_at_idx';");
+    EXPECT_EQ(indexes.size(), std::size_t{1});
+    tokens.deleteExpired(1000);
+    EXPECT_EQ(db->execute("SELECT CAST(count(*) AS TEXT) FROM refresh_tokens;")[0][0], std::string("2"));
+    tokens.deleteExpired(1001);
+    EXPECT_EQ(db->execute("SELECT CAST(count(*) AS TEXT) FROM refresh_tokens;")[0][0], std::string("0"));
+}
+
+TEST_CASE("database: refresh cleanup bounds each batch and drains expired history across cycles")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    repositories::UserRepository users(db);
+    repositories::RefreshTokenRepository tokens(db);
+    users.ensureSchema();
+    tokens.ensureSchema();
+    tests::seedUser(users, "alice", "viewer");
+    const auto user = users.getUser("alice");
+    {
+        auto transaction = tokens.beginTransaction();
+        for (int i = 1; i <= 2001; ++i)
+        {
+            auto token = repositories::RefreshTokenDto::createShared();
+            token->token = std::to_string(i);
+            token->userId = user->id;
+            token->sessionVersion = user->sessionVersion;
+            token->expiresAt = i;
+            token->revoked = i % 2;
+            tokens.createToken(token);
+        }
+        transaction.commit();
+    }
+
+    tokens.deleteExpired(2001);
+    EXPECT_EQ(db->execute("SELECT CAST(count(*) AS TEXT) FROM refresh_tokens;")[0][0], std::string("1001"));
+    EXPECT_THROW_AS(tokens.getToken("1000"), errors::database::RecordNotFound);
+    EXPECT_EQ(tokens.getToken("1001")->expiresAt.getValue(0), 1001);
+    tokens.deleteExpired(2001);
+    EXPECT_EQ(db->execute("SELECT CAST(count(*) AS TEXT) FROM refresh_tokens;")[0][0], std::string("1"));
+    EXPECT_EQ(tokens.getToken("2001")->expiresAt.getValue(0), 2001);
+    tokens.deleteExpired(2001);
+    tokens.deleteExpired(2001);
+    EXPECT_EQ(db->execute("SELECT CAST(count(*) AS TEXT) FROM refresh_tokens;")[0][0], std::string("0"));
+}
+
+#ifdef APP_DATABASE_POSTGRESQL
+TEST_CASE("database: refresh cleanup times out on locked history and can retry")
+{
+    auto db = tests::createTestDatabase();
+    db->open();
+    repositories::UserRepository users(db);
+    repositories::RefreshTokenRepository tokens(db);
+    users.ensureSchema();
+    tokens.ensureSchema();
+    tests::seedUser(users, "alice", "viewer");
+    auto token = repositories::RefreshTokenDto::createShared();
+    const auto user = users.getUser("alice");
+    token->token = "locked";
+    token->userId = user->id;
+    token->sessionVersion = user->sessionVersion;
+    token->expiresAt = 1;
+    token->revoked = 0;
+    tokens.createToken(token);
+    {
+        auto transaction = tokens.beginTransaction();
+        tokens.revokeToken("locked");
+        auto cleanup = std::async(std::launch::async,
+                                  [&]
+                                  {
+                                      EXPECT_THROW_AS(tokens.deleteExpired(1), errors::database::QueryFailed);
+                                  });
+        const auto status = cleanup.wait_for(std::chrono::seconds(8));
+        transaction.rollback();
+        cleanup.get();
+        EXPECT_TRUE(status == std::future_status::ready);
+    }
+    EXPECT_EQ(tokens.getToken("locked")->revoked.getValue(-1), 0);
+    EXPECT_EQ(db->execute("SHOW statement_timeout;")[0][0], std::string("0"));
+    tokens.deleteExpired(1);
+    EXPECT_THROW_AS(tokens.getToken("locked"), errors::database::RecordNotFound);
+}
+#endif
 
 TEST_CASE("database: transactions are isolated by owning database and reject nesting")
 {

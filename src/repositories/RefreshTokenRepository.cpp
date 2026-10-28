@@ -48,6 +48,7 @@ void RefreshTokenRepository::ensureSchema()
     }
     createTableImp();
     createUserIndexImp();
+    createExpiryIndexImp();
     if (!tableExists())
     {
         throw errors::database::QueryFailed(tableName() + " table is missing after CREATE TABLE IF NOT EXISTS");
@@ -105,7 +106,14 @@ void RefreshTokenRepository::revokeAllForUser(const oatpp::String& userId)
 
 void RefreshTokenRepository::deleteExpired(oatpp::Int64 nowTimestamp)
 {
+    auto transaction = beginTransaction();
+    if (database()->backendName() == "POSTGRESQL")
+    {
+        // Bound lock waits without changing timeouts on a pooled connection.
+        executeQuery("SET LOCAL statement_timeout = '5s';", {});
+    }
     deleteExpiredImp(nowTimestamp);
+    transaction.commit();
 }
 
 }  // namespace app::repositories

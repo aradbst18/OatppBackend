@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <future>
 #include <stdexcept>
 #include <thread>
@@ -17,6 +18,7 @@
 #include "app/application/TerminateHandler.hpp"
 #include "app/config/AppSettings.hpp"
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 
 using namespace app;
 
@@ -277,6 +279,85 @@ TEST_CASE("lifecycle: application initialize is idempotent")
 
     app.stop();
     app.stop();  // idempotent
+}
+
+TEST_CASE("lifecycle: refresh cleanup retries after failure and stops before database shutdown")
+{
+    struct CleanupState
+    {
+        std::string path = "/tmp/oatpp-cpp018-" + auth::sha256Hex(auth::generateRandomSecret(16)) + ".db";
+        std::promise<void> failed;
+        std::atomic<bool> failureObserved{false};
+        ~CleanupState()
+        {
+            logging::Logger::instance().resetToDefault();
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } state;
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    auto settings = applicationSettings();
+#ifdef APP_DATABASE_SQLCIPHER
+    settings.databasePath = state.path;
+#endif
+    {
+        application::Application seed(settings);
+        seed.initialize();
+        const auto db = seed.database();
+        if (db->backendName() == "POSTGRESQL")
+        {
+            db->executeVoid(
+                "CREATE FUNCTION reject_refresh_delete() RETURNS trigger LANGUAGE plpgsql "
+                "AS 'BEGIN RAISE EXCEPTION ''forced delete failure''; END';");
+            db->executeVoid(
+                "CREATE TRIGGER reject_refresh_delete BEFORE DELETE ON refresh_tokens "
+                "FOR EACH ROW EXECUTE FUNCTION reject_refresh_delete();");
+        }
+        else
+        {
+            db->executeVoid(
+                "CREATE TRIGGER reject_refresh_delete BEFORE DELETE ON refresh_tokens "
+                "BEGIN SELECT RAISE(ABORT, 'forced delete failure'); END;");
+        }
+        db->executeVoid(
+            "INSERT INTO refresh_tokens (token, user_id, session_version, expires_at, revoked) "
+            "SELECT 'expired', id, session_version, 1, 1 FROM users WHERE username = 'admin';");
+        db->executeVoid(
+            "INSERT INTO refresh_tokens (token, user_id, session_version, expires_at, revoked) "
+            "SELECT 'retained', id, session_version, 4102444800, 1 FROM users WHERE username = 'admin';");
+        seed.stop();
+    }
+    auto failure = state.failed.get_future();
+    logging::Logger::instance().configure(logging::Level::Error,
+                                          [&](logging::Level, const std::string&, const std::string& message)
+                                          {
+                                              if (message.find("Refresh token cleanup failed:") == 0 &&
+                                                  !state.failureObserved.exchange(true))
+                                              {
+                                                  state.failed.set_value();
+                                              }
+                                          });
+    application::Application app(settings);
+    app.initialize();
+    EXPECT_TRUE(failure.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    const auto db = app.database();
+    EXPECT_EQ(db->execute("SELECT token FROM refresh_tokens WHERE token = 'expired';").size(), std::size_t{1});
+    db->executeVoid(db->backendName() == "POSTGRESQL" ? "DROP TRIGGER reject_refresh_delete ON refresh_tokens;"
+                                                      : "DROP TRIGGER reject_refresh_delete;");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(70);
+    while (!db->execute("SELECT token FROM refresh_tokens WHERE token = 'expired';").empty() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_TRUE(db->execute("SELECT token FROM refresh_tokens WHERE token = 'expired';").empty());
+    EXPECT_EQ(app.refreshTokenRepository()->getToken("retained")->revoked.getValue(0), 1);
+    const auto stopping = std::chrono::steady_clock::now();
+    app.stop();
+    app.stop();
+    EXPECT_TRUE(std::chrono::steady_clock::now() - stopping < std::chrono::seconds(2));
+    EXPECT_FALSE(db->isOpen());
 }
 
 TEST_CASE("lifecycle: concurrent initialization publishes complete shared objects")
