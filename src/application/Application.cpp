@@ -1,7 +1,7 @@
 #include "app/application/Application.hpp"
 
-#include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -51,26 +51,26 @@ namespace app::application
 namespace
 {
 
-std::atomic<bool> g_envInitialized{false};
+std::once_flag g_envInitialized;
 
 void ensureOatppEnvironment()
 {
-    bool expected = false;
-    if (g_envInitialized.compare_exchange_strong(expected, true))
-    {
-        oatpp::base::Environment::init(std::make_shared<logging::OatppLoggerBridge>());
-        std::atexit(
-            []()
-            {
-                try
-                {
-                    oatpp::base::Environment::destroy();
-                }
-                catch (...)
-                {
-                }
-            });
-    }
+    std::call_once(g_envInitialized,
+                   []()
+                   {
+                       oatpp::base::Environment::init(std::make_shared<logging::OatppLoggerBridge>());
+                       std::atexit(
+                           []()
+                           {
+                               try
+                               {
+                                   oatpp::base::Environment::destroy();
+                               }
+                               catch (...)
+                               {
+                               }
+                           });
+                   });
 }
 
 }  // namespace
@@ -91,17 +91,31 @@ Application::~Application()
 
 void Application::initialize()
 {
-    bool expected = false;
-    if (!initialized_.compare_exchange_strong(expected, true))
+    std::lock_guard<std::mutex> lock(lifecycleMutex_);
+    if (initializationFailure_)
+    {
+        std::rethrow_exception(initializationFailure_);
+    }
+    if (initialized_)
     {
         return;
     }
 
-    ensureOatppEnvironment();
-    initInfrastructure();
-    initDatabase();
-    initServices();
-    initRouting();
+    try
+    {
+        ensureOatppEnvironment();
+        initInfrastructure();
+        initDatabase();
+        initServices();
+        initRouting();
+        initialized_ = true;
+    }
+    catch (...)
+    {
+        // Startup has side effects; retrying requires a fresh application instance.
+        initializationFailure_ = std::current_exception();
+        throw;
+    }
 }
 
 void Application::initInfrastructure()
@@ -320,6 +334,7 @@ void Application::run()
 
 void Application::stop()
 {
+    std::lock_guard<std::mutex> lock(lifecycleMutex_);
     if (server_)
     {
         try

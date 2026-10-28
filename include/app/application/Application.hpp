@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <exception>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -68,7 +70,8 @@ public:
         return settings_;
     }
 
-    /// Full startup without blocking (used by tests + run()).
+    /// Full startup; concurrent callers wait for completion. A failed instance
+    /// rethrows its original startup exception; construct a new one to recover.
     void initialize();
 
     /// Block serving HTTP until stop() is called.
@@ -98,7 +101,9 @@ private:
     void initRouting();
 
     config::AppSettings settings_;
-    std::atomic<bool> initialized_{false};
+    std::mutex lifecycleMutex_;
+    bool initialized_{false};
+    std::exception_ptr initializationFailure_;
     std::atomic<bool> running_{false};
 
     std::shared_ptr<oatpp::web::server::HttpRouter> router_;

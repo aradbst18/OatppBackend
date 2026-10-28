@@ -3,10 +3,13 @@
 #include "support/ScopedEnvironment.hpp"
 #include "support/TestDb.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <future>
 #include <thread>
+#include <vector>
 
 #include "app/application/Application.hpp"
 #include "app/application/ManagedThread.hpp"
@@ -89,6 +92,164 @@ TEST_CASE("lifecycle: application initialize is idempotent")
 
     app.stop();
     app.stop();  // idempotent
+}
+
+TEST_CASE("lifecycle: concurrent initialization publishes complete shared objects")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    application::Application app(applicationSettings());
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<std::array<const void*, 6>>> callers;
+    for (int i = 0; i < 12; ++i)
+    {
+        callers.push_back(std::async(std::launch::async,
+                                     [&, ready, i]() -> std::array<const void*, 6>
+                                     {
+                                         ready.wait();
+                                         if (i % 2 == 0)
+                                         {
+                                             app.initialize();
+                                         }
+                                         return {app.router().get(),      app.authService().get(),
+                                                 app.userService().get(), app.jwtService().get(),
+                                                 app.database().get(),    app.refreshTokenRepository().get()};
+                                     }));
+    }
+    start.set_value();
+    std::vector<std::array<const void*, 6>> objects;
+    for (auto& caller : callers)
+    {
+        objects.push_back(caller.get());
+    }
+    for (const auto& snapshot : objects)
+    {
+        for (const auto* object : snapshot)
+        {
+            EXPECT_TRUE(object != nullptr);
+        }
+        EXPECT_TRUE(snapshot == objects.front());
+    }
+    EXPECT_TRUE(app.database()->isOpen());
+    EXPECT_EQ(app.authService()->login("admin", "TestAdmin8391").role, std::string("admin"));
+    EXPECT_EQ(app.userService()->listUsers().size(), 1U);
+}
+
+TEST_CASE("lifecycle: startup failure persists until a new application is constructed")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", nullptr);
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", nullptr);
+    const auto settings = applicationSettings();
+    {
+        application::Application app(settings);
+        std::exception_ptr failure;
+        try
+        {
+            app.initialize();
+        }
+        catch (const errors::config::Missing&)
+        {
+            failure = std::current_exception();
+        }
+        EXPECT_TRUE(failure != nullptr);
+
+        const tests::ScopedEnvironment fixedUsername("APP_SEED_ADMIN_USERNAME", "admin");
+        const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+        for (int repeat = 0; repeat < 2; ++repeat)
+        {
+            std::exception_ptr repeated;
+            try
+            {
+                app.initialize();
+            }
+            catch (const errors::config::Missing&)
+            {
+                repeated = std::current_exception();
+            }
+            EXPECT_TRUE(repeated == failure);
+            EXPECT_THROW_AS(app.router(), errors::config::Missing);
+            EXPECT_THROW_AS(app.authService(), errors::config::Missing);
+            EXPECT_THROW_AS(app.userService(), errors::config::Missing);
+            EXPECT_THROW_AS(app.jwtService(), errors::config::Missing);
+            EXPECT_THROW_AS(app.database(), errors::config::Missing);
+            EXPECT_THROW_AS(app.refreshTokenRepository(), errors::config::Missing);
+            EXPECT_THROW_AS(app.run(), errors::config::Missing);
+            EXPECT_FALSE(app.isRunning());
+            app.stop();
+        }
+    }
+
+    const tests::ScopedEnvironment fixedUsername("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    application::Application recovered(settings);
+    recovered.initialize();
+    EXPECT_TRUE(recovered.database()->isOpen());
+    EXPECT_EQ(recovered.authService()->login("admin", "TestAdmin8391").role, std::string("admin"));
+}
+
+TEST_CASE("lifecycle: shutdown is synchronized with initialization")
+{
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    application::Application app(applicationSettings());
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    auto initialization = std::async(std::launch::async,
+                                     [&]()
+                                     {
+                                         ready.wait();
+                                         app.initialize();
+                                     });
+    std::vector<std::future<void>> shutdowns;
+    for (int i = 0; i < 12; ++i)
+    {
+        shutdowns.push_back(std::async(std::launch::async,
+                                       [&]()
+                                       {
+                                           ready.wait();
+                                           app.stop();
+                                       }));
+    }
+    start.set_value();
+    initialization.get();
+    for (auto& shutdown : shutdowns)
+    {
+        shutdown.get();
+    }
+    app.stop();
+    EXPECT_FALSE(app.database()->isOpen());
+    EXPECT_FALSE(app.isRunning());
+}
+
+TEST_CASE("environment: concurrent first use across application instances")
+{
+    // Fail after environment/database setup so instances never compete for a listening port.
+    const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", nullptr);
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", nullptr);
+    std::vector<std::unique_ptr<application::Application>> apps;
+    for (int i = 0; i < 12; ++i)
+    {
+        apps.push_back(std::make_unique<application::Application>(applicationSettings()));
+    }
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<void>> callers;
+    for (const auto& app : apps)
+    {
+        callers.push_back(std::async(std::launch::async,
+                                     [&, ready, instance = app.get()]()
+                                     {
+                                         ready.wait();
+                                         EXPECT_THROW_AS(instance->initialize(), errors::config::Missing);
+                                         EXPECT_FALSE(instance->isRunning());
+                                     }));
+    }
+    start.set_value();
+    for (auto& caller : callers)
+    {
+        caller.get();
+    }
 }
 
 TEST_CASE("lifecycle: application startup requires explicit initial administrator credentials")

@@ -52,6 +52,9 @@ endforeach()
 
 add_test(NAME app_tests_all COMMAND app_tests)
 
+# A separate process guarantees the environment has not been initialized by another test.
+add_test(NAME test_environment_first_use COMMAND app_tests "environment:")
+
 # Keep syscall fault injection isolated from application/database tests.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_executable(private_text_file_tests test_main.cpp test_private_text_file.cpp)
