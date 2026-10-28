@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -20,6 +21,7 @@
 
 #include "app/application/Application.hpp"
 #include "app/config/AppSettings.hpp"
+#include "app/config/ConfigStore.hpp"
 #include "app/controllers/AuthController.hpp"
 #include "app/controllers/UserController.hpp"
 #include "app/errors/AppException.hpp"
@@ -215,14 +217,16 @@ struct TestServer
     }
 };
 
-std::unique_ptr<TestServer> startServer(const std::string& trustedProxies = {})
+std::unique_ptr<TestServer> startServer(const std::string& trustedProxies = {},
+                                        const config::AppSettings* loadedSettings = nullptr)
 {
     for (int port = 18081; port < 18100; ++port)
     {
         auto srv = std::make_unique<TestServer>();
         try
         {
-            auto settings = testSettings(port);
+            auto settings = loadedSettings ? *loadedSettings : testSettings(port);
+            settings.port = static_cast<std::uint16_t>(port);
             settings.trustedProxies = trustedProxies;
             srv->app = std::make_unique<application::Application>(settings);
             srv->app->initialize();
@@ -577,6 +581,50 @@ TEST_CASE("api: cors attaches headers to responses")
 
     EXPECT_EQ(statusOf(resp), 200);
     EXPECT_TRUE(resp.find("Access-Control-Allow-Origin:") != std::string::npos);
+}
+
+TEST_CASE("api: persisted CORS policy controls preflight and ordinary response headers")
+{
+    const std::string path = "/tmp/opencode/oatpp-backend-cors-api.conf";
+    auto settings = testSettings(18081);
+    settings.corsAllowedOrigins =
+        "https://app.example.com, http://localhost:3000, http://app_service:3000, https://app_service.example.com";
+    auto store = config::createActiveStore();
+    store->save(path, settings);
+    const auto loaded = application::loadSettings(path);
+    std::remove(path.c_str());
+    auto srv = startServer({}, &loaded);
+
+    for (const auto* method : {"GET", "OPTIONS"})
+    {
+        for (const auto* origin :
+             {"https://app.example.com", "http://localhost:3000", "http://app_service:3000",
+              "https://app_service.example.com", "https://app-service.example.com", "https://evil.example.com",
+              "https://sub.app.example.com", "https://app.example.com:8443", "http://app.example.com", ""})
+        {
+            std::string request = std::string(method) + " /auth/who-am-i HTTP/1.1\r\nHost: x\r\n";
+            if (*origin != '\0')
+            {
+                request += std::string("Origin: ") + origin + "\r\n";
+            }
+            request += "Access-Control-Request-Method: GET\r\nConnection: close\r\n\r\n";
+            const auto response = httpRoundTrip("127.0.0.1", srv->port, request);
+            EXPECT_EQ(statusOf(response), std::string(method) == "OPTIONS" ? 204 : 401);
+
+            const std::string originText(origin);
+            if (originText == "https://app.example.com" || originText == "http://localhost:3000" ||
+                originText == "http://app_service:3000" || originText == "https://app_service.example.com")
+            {
+                EXPECT_TRUE(response.find("Access-Control-Allow-Origin: " + originText + "\r\n") != std::string::npos);
+                EXPECT_TRUE(response.find("Access-Control-Allow-Credentials: true\r\n") != std::string::npos);
+                EXPECT_TRUE(response.find("Vary: Origin\r\n") != std::string::npos);
+            }
+            else
+            {
+                EXPECT_EQ(response.find("Access-Control-"), std::string::npos);
+            }
+        }
+    }
 }
 
 TEST_CASE("api: cors origin filtering unit test")

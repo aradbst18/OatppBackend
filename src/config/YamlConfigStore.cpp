@@ -57,6 +57,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
         {
             *missing = {"server.host",
                         "server.port",
+                        "server.corsAllowedOrigins",
                         "database.path",
 #ifdef APP_DATABASE_POSTGRESQL
                         "database.port",
@@ -108,6 +109,19 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
 
         if (const infrastructure::documents::DocumentValue* server = requireGroup(root, "server", path))
         {
+            if (const auto* origins = server->find("corsAllowedOrigins"))
+            {
+                if (!origins->isString())
+                {
+                    throw errors::config::Invalid("server.corsAllowedOrigins must be a string in " + path);
+                }
+                s.corsAllowedOrigins = origins->asString();
+            }
+            else
+            {
+                noteMissing("server", "corsAllowedOrigins");
+            }
+
             if (const auto* proxies = server->find("trustedProxies"))
             {
                 if (!proxies->isString())
@@ -145,6 +159,7 @@ AppSettings YamlConfigStore::load(const std::string& path, std::vector<std::stri
         {
             noteMissing("server", "host");
             noteMissing("server", "port");
+            noteMissing("server", "corsAllowedOrigins");
         }
 
         if (const infrastructure::documents::DocumentValue* database = requireGroup(root, "database", path))
@@ -340,6 +355,7 @@ void YamlConfigStore::save(const std::string& path, const AppSettings& settings,
     infrastructure::documents::DocumentValue server = infrastructure::documents::DocumentValue::makeMap();
     server["host"] = settings.host;
     server["trustedProxies"] = settings.trustedProxies;
+    server["corsAllowedOrigins"] = settings.corsAllowedOrigins;
     server["port"] = static_cast<std::int64_t>(settings.port);
 
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();

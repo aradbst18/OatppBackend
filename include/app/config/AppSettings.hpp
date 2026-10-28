@@ -57,6 +57,8 @@ struct AppSettings
     /// relocated copy (e.g. the installed `share/swagger-res`). Only used
     /// when built with APP_WITH_SWAGGER.
     std::string swaggerResPath;
+
+    /// "*" or comma-separated exact HTTP(S) origins; explicit empty values are invalid.
     std::string corsAllowedOrigins = "*";
     std::string configSource;  // filled with the file the settings came from
 

@@ -82,6 +82,19 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
                 throw errors::config::Invalid("Invalid <server> group in " + path);
             }
 
+            if (const auto* origins = server->find("corsAllowedOrigins"))
+            {
+                if (!origins->isString())
+                {
+                    throw errors::config::Invalid("server.corsAllowedOrigins must be a string in " + path);
+                }
+                s.corsAllowedOrigins = origins->asString();
+            }
+            else
+            {
+                noteMissing("server", "corsAllowedOrigins");
+            }
+
             if (const auto* proxies = server->find("trustedProxies"))
             {
                 if (!proxies->isString())
@@ -131,6 +144,10 @@ AppSettings XmlConfigStore::load(const std::string& path, std::vector<std::strin
                     throw errors::config::Invalid("Invalid <port> in " + path);
                 }
             }
+        }
+        else
+        {
+            noteMissing("server", "corsAllowedOrigins");
         }
 
         if (const infrastructure::documents::DocumentValue* database = findGroup(*root, "database"))
@@ -372,6 +389,7 @@ void XmlConfigStore::save(const std::string& path, const AppSettings& settings, 
     infrastructure::documents::DocumentValue server = infrastructure::documents::DocumentValue::makeMap();
     server["host"] = settings.host;
     server["trustedProxies"] = settings.trustedProxies;
+    server["corsAllowedOrigins"] = settings.corsAllowedOrigins;
     server["port"] = std::to_string(settings.port);
 
     infrastructure::documents::DocumentValue database = infrastructure::documents::DocumentValue::makeMap();

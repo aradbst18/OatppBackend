@@ -36,7 +36,7 @@ never linked. Selecting a format whose parser is disabled is a configure-time
 
 ```json
 {
-  "server": {"host": "127.0.0.1", "port": 8080, "trustedProxies": ""},
+  "server": {"host": "127.0.0.1", "port": 8080, "trustedProxies": "", "corsAllowedOrigins": "*"},
   "database": {"path": "data/postgresql", "key": "REPLACE_ME", "port": 5433, "name": "oatpp_backend",
                "user": "oatpp_tester"},
   "jwt": {"secret": "REPLACE_ME", "issuer": "oatpp-backend", "ttlSeconds": 3600},
@@ -49,7 +49,7 @@ The `REPLACE_ME` values above are placeholders and are rejected at startup.
 Use generated secrets for a new installation, or the matching private database
 key/password and a unique JWT secret for an existing installation.
 
-Leaf mapping: `host`/`port`/`trustedProxies`, `database.path` (`databasePath`: file path
+Leaf mapping: `host`/`port`/`trustedProxies`/`corsAllowedOrigins`, `database.path` (`databasePath`: file path
 for SQLCIPHER, e.g. `data/app.db`, or Unix socket dir for
 POSTGRESQL, e.g. `data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
 `database.key` (`databaseKey`: SQLCipher encryption key or PostgreSQL
@@ -162,6 +162,32 @@ expires at most 16 old buckets, ordered by their last accepted request; active
 buckets are never evicted to admit a new identity. Each bucket retains at most
 10 timestamps. These bounds are constructor options for embedded C++ callers;
 they are not runtime file settings. Limits are local to each server process.
+
+## CORS origins
+
+`server.corsAllowedOrigins` is a string in all four formats. Set it to `"*"`
+to allow every origin, or to comma-separated HTTP(S) origins, for example
+`"https://app.example.com, http://localhost:3000"`. Spaces and tabs around
+entries are ignored. Use the exact origin sent by the browser: scheme,
+host (including brackets for IPv6), and port when present, without a path,
+query, fragment, or user credentials. Matching is exact and case-sensitive;
+there is no URL normalization, subdomain matching, or partial wildcard syntax.
+
+Explicit empty strings, blank entries, malformed origins, embedded control characters,
+and wildcards mixed with explicit origins are rejected on load, save, and
+application construction. A missing setting keeps the existing `"*"` default
+and is recorded for configuration completion. Generated files and all four
+sample files include the setting; quote `"*"` in YAML.
+
+Allowed origins receive `Access-Control-Allow-Origin` with that origin and
+`Access-Control-Allow-Credentials: true`. Restricted policies also set
+`Vary: Origin` for allowed requests. Disallowed origins receive no CORS
+permission headers, including on preflight OPTIONS responses (which remain
+HTTP 204). Requests without an Origin receive no CORS permission headers
+under a restricted policy. CORS does not replace authentication or authorization.
+
+The compatibility default remains permissive; configure an explicit allowlist
+to restrict browser access, especially because credentialed CORS is enabled.
 
 ## Settings completeness
 

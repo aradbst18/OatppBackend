@@ -2,7 +2,8 @@
     "server": {
         "host": "127.0.0.1",
         "port": 8080,
-        "trustedProxies": ""
+        "trustedProxies": "",
+        "corsAllowedOrigins": "*"
     },
     "database": {
         "path": "data/postgresql",

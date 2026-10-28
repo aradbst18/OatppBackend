@@ -196,6 +196,137 @@ TEST_CASE("config: all formats reject invalid proxy trust on load and save")
     }
 }
 
+TEST_CASE("config: all formats load and round trip CORS policies and complete missing origins")
+{
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("cors-origins.conf");
+        auto root = minimalConfig();
+        std::vector<std::string> missing;
+        writeConfig(format, path, root);
+        EXPECT_EQ(format.store->load(path, &missing).corsAllowedOrigins, std::string("*"));
+        EXPECT_TRUE(hasMissing(missing, "server.corsAllowedOrigins"));
+
+        root["server"]["port"] = 8080;
+        writeConfig(format, path, root);
+        missing.clear();
+        const auto defaults = format.store->load(path, &missing);
+        EXPECT_EQ(defaults.corsAllowedOrigins, std::string("*"));
+        EXPECT_TRUE(hasMissing(missing, "server.corsAllowedOrigins"));
+        format.store->save(path, defaults);
+        missing.clear();
+        format.store->load(path, &missing);
+        EXPECT_TRUE(missing.empty());
+
+        for (const auto* policy :
+             {"https://app.example.com", "http://localhost:3000, https://trusted.example.com",
+              "http://app_service:3000", "https://app_service.example.com",
+              "http://127.0.0.1:8080, https://[::1]:8443", "http://localhost:0, https://127.0.0.1:65535",
+              " \thttps://xn--bcher-kva.example\t, http://[2001:db8::1]\t ", "*"})
+        {
+            root["server"]["corsAllowedOrigins"] = policy;
+            writeConfig(format, path, root);
+            const auto settings = format.store->load(path);
+            EXPECT_EQ(settings.corsAllowedOrigins, std::string(policy));
+            format.store->save(path, settings);
+            EXPECT_EQ(format.store->load(path).corsAllowedOrigins, std::string(policy));
+        }
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: invalid CORS policies are rejected without changing configuration files")
+{
+    const std::vector<std::string> invalid = {"",
+                                              " ",
+                                              "\t",
+                                              "null",
+                                              "* , https://app.example.com",
+                                              "https://app.example.com, *",
+                                              ",https://app.example.com",
+                                              "https://app.example.com,",
+                                              "https://app.example.com, , http://localhost",
+                                              "https://*.example.com",
+                                              "app.example.com",
+                                              "ftp://app.example.com",
+                                              "https://",
+                                              "https://.example.com",
+                                              "https://app..example.com",
+                                              "https://-app.example.com",
+                                              "https://app-.example.com",
+                                              "http://999.1.1.1",
+                                              "https://app.example.com/",
+                                              "https://app.example.com/path",
+                                              "https://app.example.com?query",
+                                              "https://app.example.com#fragment",
+                                              "https://user@app.example.com",
+                                              "https://app.example.com:",
+                                              "https://app.example.com:-1",
+                                              "https://app.example.com:65536",
+                                              "https://app.example.com:9999999999999999999999",
+                                              "https://app.example.com:443x",
+                                              "http://::1",
+                                              "http://[not-an-ip]",
+                                              "http://[::1",
+                                              "https://app.example.com\r\nInjected: true",
+                                              "\nhttps://app.example.com",
+                                              std::string("https://app.example.com\0", 24)};
+    for (const auto& policy : invalid)
+    {
+        auto settings = validSettings();
+        settings.corsAllowedOrigins = policy;
+        EXPECT_TRUE(settings.validate().find("server.corsAllowedOrigins") != std::string::npos);
+        EXPECT_THROW_AS(application::Application{settings}, errors::config::Invalid);
+    }
+
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("invalid-cors.conf");
+        for (const auto& policy : invalid)
+        {
+            // XML 1.0 cannot represent NUL in character data.
+            if (format.xml && policy.find('\0') != std::string::npos)
+            {
+                continue;
+            }
+            auto root = minimalConfig();
+            root["server"]["corsAllowedOrigins"] = policy;
+            writeConfig(format, path, root);
+            expectConfigRejected(*format.store, path, "server.corsAllowedOrigins");
+            const auto original = infrastructure::readTextFile(path);
+            auto settings = validSettings();
+            settings.corsAllowedOrigins = policy;
+            EXPECT_THROW_AS(format.store->save(path, settings), errors::config::Invalid);
+            EXPECT_EQ(infrastructure::readTextFile(path), original);
+        }
+        std::remove(path.c_str());
+    }
+}
+
+TEST_CASE("config: all formats reject non-string CORS policies")
+{
+    auto object = DocumentValue::makeMap();
+    object["origin"] = "https://app.example.com";
+    const DocumentValue list(DocumentValue::List{"https://app.example.com", "http://localhost:3000"});
+    for (auto& format : configFormats())
+    {
+        const auto path = tmpPath("cors-types.conf");
+        std::vector<DocumentValue> values{DocumentValue(true), DocumentValue(42), object, list};
+        if (std::string(format.store->formatName()) != "TOML")
+        {
+            values.emplace_back(nullptr);
+        }
+        for (const DocumentValue& value : values)
+        {
+            auto root = minimalConfig();
+            root["server"]["corsAllowedOrigins"] = value;
+            writeConfig(format, path, root);
+            expectConfigRejected(*format.store, path, "server.corsAllowedOrigins");
+        }
+        std::remove(path.c_str());
+    }
+}
+
 TEST_CASE("config: defaults contain no secrets and require explicit configuration")
 {
     const auto defaults = config::AppSettings::defaults();
