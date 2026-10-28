@@ -42,8 +42,8 @@ fire only for our code.
 
 ## Error handling and logging
 
-- Services throw fine-grained `AppException` subtypes (`request::*`, `authentication::*`, `validation::*`, `database::*`, ...); `AppErrorHandler` maps them to `Status + text/plain`. Success via `createDtoResponse` JSON. No numeric envelope, no exception text with
-  secrets, no status codes outside the documented set.
+- Services throw fine-grained `AppException` subtypes (`request::*`, `authentication::*`, `validation::*`, `database::*`, ...); `AppErrorHandler` preserves their HTTP status and selects fixed public `text/plain` messages. All 5xx bodies are generic. Success uses `createDtoResponse` JSON; errors have no numeric envelope.
+- Exception `what()` text is diagnostic, never a public message. The HTTP handler redacts free-form diagnostics in full and logs the status, error category, and matching `X-Error-Id`. Never put secrets in exceptions, since other internal consumers may log them. Framework errors use the same response policy; only `WWW-Authenticate`, `Allow`, and `Retry-After` are forwarded from framework error headers.
 - Log with levels (`TRACE..CRITICAL`), tags per subsystem, no passwords /
   JWTs / keys / raw tokens. Oatpp internal logs flow through
   `OatppLoggerBridge`.

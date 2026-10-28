@@ -12,12 +12,16 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <jwt-cpp/jwt.h>
+
+#include "oatpp/web/protocol/http/outgoing/Response.hpp"
 
 #include "app/application/Application.hpp"
 #include "app/config/AppSettings.hpp"
@@ -26,6 +30,7 @@
 #include "app/controllers/UserController.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/errors/ErrorMapper.hpp"
+#include "app/logging/Logger.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
 #include "app/middlewares/CorsInterceptor.hpp"
 #include "app/middlewares/RateLimitInterceptor.hpp"
@@ -35,6 +40,100 @@ using namespace app;
 
 namespace
 {
+
+constexpr char kPrivateDiagnostic[] =
+    "CPP020_PRIVATE_DATABASE /private/CPP020_PATH password=CPP020_PASSWORD Bearer CPP020_TOKEN\nCPP020_INJECTED_LOG";
+
+struct ErrorLogCapture
+{
+    std::vector<std::string> messages;
+    logging::Level level{logging::Logger::instance().minLevel()};
+    std::string directory{logging::Logger::instance().logFileDirectory()};
+
+    ErrorLogCapture()
+    {
+        auto& logger = logging::Logger::instance();
+        logger.setLogFileDirectory("");
+        logger.configure(logging::Level::Trace,
+                         [this](logging::Level, const std::string& tag, const std::string& message)
+                         {
+                             if (tag == "error")
+                             {
+                                 messages.push_back(message);
+                             }
+                         });
+    }
+
+    ~ErrorLogCapture()
+    {
+        auto& logger = logging::Logger::instance();
+        logger.resetToDefault();
+        logger.setMinLevel(level);
+        logger.setLogFileDirectory(directory);
+    }
+};
+
+std::exception_ptr wrapError(const std::exception_ptr& error)
+{
+    try
+    {
+        std::rethrow_exception(error);
+    }
+    catch (...)
+    {
+        try
+        {
+            std::throw_with_nested(std::runtime_error(kPrivateDiagnostic));
+        }
+        catch (...)
+        {
+            return std::current_exception();
+        }
+    }
+}
+
+std::string expectPublicError(const std::shared_ptr<oatpp::web::protocol::http::outgoing::Response>& response,
+                              int status, const ErrorLogCapture& log)
+{
+    EXPECT_EQ(response->getStatus().code, status);
+    EXPECT_TRUE(response->getBody()->getKnownSize() > 0);
+    const std::string body(reinterpret_cast<const char*>(response->getBody()->getKnownData()),
+                           static_cast<std::size_t>(response->getBody()->getKnownSize()));
+    if (status >= 500)
+    {
+        EXPECT_EQ(body, std::string("an internal server error occurred"));
+    }
+    EXPECT_TRUE(response->getHeader("Content-Type"));
+    EXPECT_EQ(*response->getHeader("Content-Type"), std::string("text/plain"));
+    const auto id = response->getHeader("X-Error-Id");
+    EXPECT_TRUE(id);
+    const std::string eventId = *id;
+    EXPECT_EQ(eventId.size(), 32u);
+    EXPECT_EQ(eventId.find_first_not_of("0123456789abcdef"), std::string::npos);
+    EXPECT_FALSE(log.messages.empty());
+    bool matchingEvent = false;
+    for (const auto& message : log.messages)
+    {
+        matchingEvent |=
+            message.find("event=" + eventId + " status=" + std::to_string(status) + " code=") != std::string::npos;
+    }
+    EXPECT_TRUE(matchingEvent);
+    EXPECT_TRUE(log.messages.back().find("diagnostic=[redacted]") != std::string::npos);
+    for (const char* marker : {"CPP020_", "password=", "Bearer CPP020"})
+    {
+        EXPECT_EQ(body.find(marker), std::string::npos);
+        EXPECT_EQ(std::string(response->getStatus().description).find(marker), std::string::npos);
+        for (const auto& header : response->getHeaders().getAll())
+        {
+            EXPECT_EQ(header.second.std_str().find(marker), std::string::npos);
+        }
+        for (const auto& message : log.messages)
+        {
+            EXPECT_EQ(message.find(marker), std::string::npos);
+        }
+    }
+    return eventId;
+}
 
 int connectTo(const std::string& host, int port, const std::string& sourceIp = {})
 {
@@ -327,6 +426,8 @@ TEST_CASE("api: login rejects bad credentials and the published password with 40
 
         const std::string resp = httpRoundTrip("127.0.0.1", srv->port, req);
         EXPECT_EQ(statusOf(resp), 401);
+        EXPECT_EQ(bodyOf(resp), std::string("Invalid credentials"));
+        EXPECT_TRUE(resp.find("X-Error-Id:") != std::string::npos);
         EXPECT_EQ(bodyOf(resp).find("access_token"), std::string::npos);
     }
 }
@@ -346,6 +447,7 @@ TEST_CASE("api: login with Int8 overflow returns 400")
     // Deserialization range failure must fail closed with 400 (never 2xx, never
     // silently accepted). The parser message must not echo the offending value.
     EXPECT_EQ(statusOf(resp), 400);
+    EXPECT_TRUE(resp.find("X-Error-Id:") != std::string::npos);
     EXPECT_TRUE(bodyOf(resp).find("64654646") == std::string::npos);
 }
 
@@ -471,6 +573,146 @@ TEST_CASE("api: error mapper maps codes to http status")
     EXPECT_EQ(errors::toHttpStatus(errors::ErrorCode::ExternalServiceInvalidResponse), 502);
     EXPECT_EQ(errors::statusFor(errors::ErrorCode::InvalidCredentials).code, 401);
     EXPECT_EQ(errors::toHttpStatus(errors::ErrorCode::RateLimited), 429);
+}
+
+TEST_CASE("api: error mapper hides diagnostics for direct and nested application exceptions")
+{
+    ErrorLogCapture log;
+    errors::AppErrorHandler handler;
+    struct Example
+    {
+        std::exception_ptr error;
+        int status;
+        const char* category;
+    };
+    const std::vector<Example> examples{
+        {std::make_exception_ptr(errors::database::QueryFailed(kPrivateDiagnostic)), 500, "DatabaseQueryFailed"},
+        {std::make_exception_ptr(errors::database::TransactionFailed(kPrivateDiagnostic)), 500,
+         "DatabaseTransactionFailed"},
+        {std::make_exception_ptr(errors::database::ConnectionFailed(kPrivateDiagnostic)), 500,
+         "DatabaseConnectionFailed"},
+        {std::make_exception_ptr(errors::config::Invalid(kPrivateDiagnostic)), 500, "ConfigurationInvalid"},
+        {std::make_exception_ptr(errors::filesystem::ReadFailed(kPrivateDiagnostic)), 500, "FileReadFailed"},
+        {std::make_exception_ptr(errors::external_service::InvalidResponse(kPrivateDiagnostic)), 502,
+         "ExternalServiceInvalidResponse"},
+        {std::make_exception_ptr(errors::resource::Unavailable(kPrivateDiagnostic)), 503, "ResourceUnavailable"},
+        {std::make_exception_ptr(errors::network::Timeout(kPrivateDiagnostic)), 504, "NetworkTimeout"},
+        {std::make_exception_ptr(errors::serialization::ParsingFailed(kPrivateDiagnostic)), 400,
+         "SerializationParsingFailed"},
+        {std::make_exception_ptr(errors::authentication::InvalidToken(kPrivateDiagnostic)), 401, "InvalidToken"},
+        {std::make_exception_ptr(errors::authorization::ResourceAccessDenied(kPrivateDiagnostic)), 403,
+         "ResourceAccessDenied"},
+        {std::make_exception_ptr(errors::filesystem::NotFound(kPrivateDiagnostic)), 404, "FileNotFound"},
+        {std::make_exception_ptr(errors::database::Conflict(kPrivateDiagnostic)), 409, "DatabaseConflict"},
+        {std::make_exception_ptr(errors::validation::InvalidValue(kPrivateDiagnostic)), 422, "ValidationInvalidValue"},
+        {std::make_exception_ptr(errors::ratelimit::Exceeded(kPrivateDiagnostic)), 429, "RateLimited"},
+    };
+
+    std::set<std::string> eventIds;
+    for (const auto& example : examples)
+    {
+        for (const auto& error : {example.error, wrapError(wrapError(example.error))})
+        {
+            const auto response = handler.handleError(error);
+            EXPECT_TRUE(eventIds.insert(expectPublicError(response, example.status, log)).second);
+            EXPECT_TRUE(log.messages.back().find(std::string("code=") + example.category + " ") != std::string::npos);
+        }
+    }
+    EXPECT_EQ(log.messages.size(), eventIds.size());
+}
+
+TEST_CASE("api: error mapper sanitizes framework errors and preserves required headers")
+{
+    ErrorLogCapture log;
+    errors::AppErrorHandler handler;
+    using Status = oatpp::web::protocol::http::Status;
+    oatpp::web::protocol::http::Headers headers;
+    headers.put("WWW-Authenticate", "Bearer");
+    headers.put("Allow", "GET, POST");
+    headers.put("Retry-After", "10");
+    headers.put("Content-Type", "application/json");
+    headers.put("Content-Length", "999999");
+    headers.put("X-Error-Id", kPrivateDiagnostic);
+    headers.put("X-Internal-Error", kPrivateDiagnostic);
+    struct Example
+    {
+        int status;
+        const char* message;
+        int expected;
+    };
+    for (const auto& example : {
+             Example{400, "parse JSON: ", 400},
+             Example{400, "validate: ", 422},
+             Example{404, "missing file: ", 404},
+             Example{409, "SQL error: ", 409},
+             Example{422, "validation: ", 422},
+             Example{429, "limit: ", 429},
+             Example{500, "engine failure: ", 500},
+             Example{500, "deserialize body: ", 400},
+             Example{500, "DTO range: ", 400},
+             Example{500, "validation: ", 422},
+             Example{502, "invalid response body: ", 502},
+             Example{503, "validate connection: ", 503},
+             Example{504, "parse timeout: ", 504},
+             Example{418, "unknown status: ", 418},
+         })
+    {
+        const std::string message = std::string(example.message) + kPrivateDiagnostic + std::string(1024, 'x');
+        const Status status(example.status, kPrivateDiagnostic);
+        const auto error = std::make_exception_ptr(oatpp::web::protocol::http::HttpError(status, message, headers));
+        for (const auto& response : {handler.handleError(status, message, headers), handler.handleError(error),
+                                     handler.handleError(wrapError(error))})
+        {
+            expectPublicError(response, example.expected, log);
+            EXPECT_TRUE(response->getHeader("WWW-Authenticate"));
+            EXPECT_TRUE(response->getHeader("Allow"));
+            EXPECT_TRUE(response->getHeader("Retry-After"));
+            EXPECT_EQ(*response->getHeader("WWW-Authenticate"), std::string("Bearer"));
+            EXPECT_EQ(*response->getHeader("Allow"), std::string("GET, POST"));
+            EXPECT_EQ(*response->getHeader("Retry-After"), std::string("10"));
+            EXPECT_FALSE(response->getHeader("X-Internal-Error"));
+            EXPECT_FALSE(response->getHeader("Content-Length"));
+        }
+    }
+    expectPublicError(handler.handleError(Status(500, kPrivateDiagnostic), nullptr, {}), 500, log);
+}
+
+TEST_CASE("api: error mapper handles unknown and empty exceptions without diagnostic disclosure")
+{
+    ErrorLogCapture log;
+    errors::AppErrorHandler handler;
+    struct EmptyNestedError : std::runtime_error, std::nested_exception
+    {
+        EmptyNestedError() : std::runtime_error(kPrivateDiagnostic)
+        {
+        }
+    };
+    for (const auto& error :
+         {std::exception_ptr{}, std::make_exception_ptr(std::runtime_error(kPrivateDiagnostic)),
+          std::make_exception_ptr(std::string(kPrivateDiagnostic)), std::make_exception_ptr(EmptyNestedError{})})
+    {
+        expectPublicError(handler.handleError(error), 500, log);
+    }
+    expectPublicError(handler.handleError(std::make_exception_ptr(
+                          std::runtime_error(std::string("JSON parse error: ") + kPrivateDiagnostic))),
+                      400, log);
+}
+
+TEST_CASE("api: error mapper still responds when its log sink fails")
+{
+    ErrorLogCapture log;
+    logging::Logger::instance().configure(logging::Level::Trace,
+                                          [](logging::Level, const std::string&, const std::string&)
+                                          {
+                                              throw std::runtime_error(kPrivateDiagnostic);
+                                          });
+    const auto response = errors::AppErrorHandler{}.handleError(
+        std::make_exception_ptr(errors::database::QueryFailed(kPrivateDiagnostic)));
+    EXPECT_EQ(response->getStatus().code, 500);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(response->getBody()->getKnownData()),
+                          static_cast<std::size_t>(response->getBody()->getKnownSize())),
+              std::string("an internal server error occurred"));
+    EXPECT_TRUE(response->getHeader("X-Error-Id"));
 }
 
 TEST_CASE("api: rate limiter window and key isolation")

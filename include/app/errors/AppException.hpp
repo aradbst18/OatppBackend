@@ -13,9 +13,9 @@ namespace app::errors
 /// request shape, auth/session, resources, validation, filesystem, database,
 /// serialization, network, configuration, crypto, websocket, external services,
 /// rate limiting, runtime and internal operations. Each maps to exactly one HTTP
-/// status via `toHttpStatus()` (see AppErrorHandler::statusFor); the HTTP status
-/// goes on the status line and the human-readable `what()` goes in a `text/plain`
-/// body — no numeric `4000`-style envelope.
+/// status via `toHttpStatus()`; the HTTP status goes on the status line and an
+/// approved public message goes in a `text/plain` body. Diagnostic `what()` text
+/// is never forwarded by AppErrorHandler — no numeric `4000`-style envelope.
 enum class ErrorCode
 {
     RequestInvalid,
@@ -77,8 +77,8 @@ int toHttpStatus(ErrorCode code) noexcept;
  * `createResponse` / `createDtoResponse` helpers directly for expected cases
  * and let domain exceptions bubble to the handler otherwise.
  *
- * Never include secrets in `what()` strings since the message is sent to
- * clients and written to logs.
+ * `what()` is diagnostic text, separate from the handler's public messages.
+ * Never include secrets: other internal exception consumers may log it.
  */
 class AppException : public std::runtime_error
 {

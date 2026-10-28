@@ -19,9 +19,11 @@ namespace app::errors
  * ad-hoc error bodies.
  *
  * - `handleError(exception_ptr)` catches `AppException` (including nested) and
- *   maps `ErrorCode -> HTTP Status` + `what()` message.
+ *   maps `ErrorCode -> HTTP Status` + an approved public message.
  * - `handleError(status, message, headers)` handles oatpp-generated errors
- *   (deserialization, validation, 404s) as plain text.
+ *   (deserialization, validation, 404s) with the same public-message policy.
+ * Both paths return an `X-Error-Id` matching the internal log. Logs retain
+ * status and error category; free-form diagnostics are redacted in full.
  *
  * Success payloads keep using `createDtoResponse(Status, dto)` (JSON);
  * errors are `Status + text/plain message` — no numeric `4000`-style envelope.
@@ -40,7 +42,8 @@ public:
 
 private:
     std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createErrorResponse(
-        const oatpp::web::protocol::http::Status& status, const std::string& message = "");
+        const oatpp::web::protocol::http::Status& status, const char* errorName,
+        const oatpp::web::protocol::http::Headers& headers = {});
 };
 
 /// Map a domain ErrorCode to its HTTP Status (shared by handler + controllers).
@@ -48,6 +51,7 @@ oatpp::web::protocol::http::Status statusFor(ErrorCode code);
 
 /// Build a `text/plain` error response for non-controller contexts
 /// (e.g. `AuthInterceptor`, which cannot use `ApiController::createResponse`).
+/// The caller must supply public-safe status text and message.
 std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createTextError(
     const oatpp::web::protocol::http::Status& status, const std::string& message = "");
 

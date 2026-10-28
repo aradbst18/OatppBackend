@@ -71,9 +71,12 @@ TCP -> HttpConnectionHandler -> AuthInterceptor -> Router -> Controller
 ## Response lifecycle
 
 Success: service result -> DTO -> `createDtoResponse(200, dto)` serialized by
-the range-checked `AppObjectMapper`. Errors: `Status + text/plain` via `createResponse`/`AppErrorHandler` (status,
-appCode, name, message)` — always JSON, never plaintext, never leaking token
-or key material.
+the range-checked `AppObjectMapper`. Errors use `Status + text/plain` via
+`AppErrorHandler`, with fixed public messages and a generic body for all 5xx
+statuses. `X-Error-Id` identifies the matching internal log, which records the
+status and error category with free-form diagnostics redacted in full. Domain
+status mappings are preserved, including nested exceptions. Framework parser
+and validation errors are normalized to 400/422 without returning parser text.
 
 ## Application lifecycle
 

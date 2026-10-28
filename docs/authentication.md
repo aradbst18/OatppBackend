@@ -157,6 +157,11 @@ to status; e.g. `401` body is just:
 Invalid credentials
 ```
 
+The handler selects fixed public messages rather than forwarding exception or
+parser diagnostics. All 5xx messages are generic. `X-Error-Id` identifies the
+corresponding internal log, which retains status and category with free-form
+diagnostics redacted in full.
+
 ## Security notes
 
 - Secrets (JWT secret, DB key, passwords, raw tokens) are never logged.

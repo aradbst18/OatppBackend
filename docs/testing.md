@@ -29,7 +29,7 @@ separately with `sudo -- build/cpp001/tests/private_text_file_tests 'multi-user 
 | `test_database.cpp`    | backend name, CRUD, injection stored literally, bad SQL (message names the failing table), `?`/`:` translation rules + parameter-count checks, repository CRUD (create/get/update/delete, not-found, conflict, invalid input), empty-key plaintext mode, wrong-key open failure, password-hash protocol |
 | `test_pg_test_db.cpp`  | PostgreSQL provisioning preserves unrelated databases, independent run ownership, failed creation, cleanup retry, original connection settings |
 | `test_generic_document.cpp` | `DocumentValue` core, JSON/TOML/XML/YAML parse+serialize round-trips, file-database inspector, PostgreSQL inspector (needs server) |
-| `test_api.cpp`         | live HTTP: login 200/token, bad credentials 401, Int8 overflow 400, who-am-i 401/200, interceptor classification, error-code mapping |
+| `test_api.cpp`         | live HTTP: login 200/token, bad credentials 401, Int8 overflow 400, who-am-i 401/200, interceptor classification; error-code mapping, direct/nested exception privacy, framework errors, safe headers, event/log correlation, failing log sink |
 | `test_websocket.cpp`   | real WS handshake (101) + masked `hello` -> `Server echo: hello` |
 | `test_lifecycle.cpp`   | `ManagedThread` start/join/idempotent stop, natural-completion restart, startup-copy failure recovery, concurrent lifecycle calls, worker self-calls, `Application` init idempotency, bootstrap startup failures, custom administrator protection, terminate handler, defaults fallback |
 | `test_features.cpp`    | exactly-one config/users-db define, file-support/user-db consistency, gzip round-trip (or absence, see `docs/zlib.md`), swagger doc build, C++17 check |
