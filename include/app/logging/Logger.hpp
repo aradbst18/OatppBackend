@@ -34,8 +34,9 @@ bool tryParseLevel(const std::string& text, Level& out) noexcept;
  * - One process-wide instance behind `instance()`; configuration (level, sink,
  *   log file directory) is explicit and testable via `configure()` /
  *   `setLogFileDirectory()`.
- * - All writes are serialized with a mutex; the sink is a std::function so
- *   tests can capture output without touching the filesystem.
+ * - Sink calls and file writes are serialized between threads in this process,
+ *   separately from configuration access. Same-thread nested logging is allowed.
+ *   The sink is a std::function so tests can capture output without filesystem access.
  * - Every emitted line starts with a local timestamp (`HH:MM:SS.mmm`),
  *   followed by the level, tag, and message:
  *   `HH:MM:SS.mmm [LEVEL] [tag] message`. This holds for both the console
@@ -58,6 +59,8 @@ public:
     Logger& operator=(const Logger&) = delete;
 
     /// Set minimum emitted level and the output sink.
+    /// In-flight records may still use the previous sink. Callbacks may access configuration
+    /// and log on the same thread, but must not wait for another thread to finish logging.
     void configure(Level minLevel, Sink sink);
 
     /// Restore the default (INFO to stderr, no file logging).
@@ -95,6 +98,7 @@ private:
     static void appendToFile(const std::string& dir, const std::string& line);
 
     mutable std::mutex mutex_;
+    std::recursive_mutex outputMutex_;
     Level minLevel_{Level::Info};
     Sink sink_{&Logger::defaultSink};
     std::string logFileDir_;

@@ -212,6 +212,7 @@ void Logger::log(Level level, const std::string& tag, const std::string& message
         timestamp = currentTimeString();
     }
 
+    std::lock_guard<std::recursive_mutex> outputLock(outputMutex_);
     sinkCopy(level, tag, message);
     if (!dirCopy.empty())
     {

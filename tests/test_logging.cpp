@@ -1,10 +1,15 @@
 #include "support/TestRunner.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "app/logging/Logger.hpp"
 
@@ -13,7 +18,7 @@ using namespace app;
 namespace
 {
 
-/// Save/restore the process-wide logger so file-logging tests stay hermetic.
+/// Restore the default sink and saved settings before captured test state is destroyed.
 struct LoggerGuard
 {
     logging::Level level;
@@ -25,6 +30,7 @@ struct LoggerGuard
 
     ~LoggerGuard()
     {
+        logging::Logger::instance().resetToDefault();
         logging::Logger::instance().setMinLevel(level);
         logging::Logger::instance().setLogFileDirectory(dir);
     }
@@ -159,4 +165,129 @@ TEST_CASE("logging: lazy macro avoids evaluating expression when level disabled"
 
     APP_LOG_ERROR("lazy-test", expensiveMessage());
     EXPECT_TRUE(evaluated);
+}
+
+TEST_CASE("logging: sink calls from different threads do not overlap")
+{
+    std::atomic<int> active{0};
+    std::atomic<int> calls{0};
+    std::atomic<bool> overlap{false};
+    LoggerGuard guard;
+    auto& logger = logging::Logger::instance();
+    logger.setLogFileDirectory("");
+    logger.configure(logging::Level::Info,
+                     [&](logging::Level, const std::string&, const std::string&)
+                     {
+                         if (active.fetch_add(1) != 0)
+                         {
+                             overlap = true;
+                         }
+                         std::this_thread::sleep_for(std::chrono::microseconds(200));
+                         ++calls;
+                         --active;
+                     });
+
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<void>> callers;
+    for (int i = 0; i < 8; ++i)
+    {
+        callers.push_back(std::async(std::launch::async,
+                                     [&]
+                                     {
+                                         ready.wait();
+                                         for (int j = 0; j < 16; ++j)
+                                         {
+                                             logging::logInfo("concurrent", "message");
+                                         }
+                                     }));
+    }
+    start.set_value();
+    for (auto& caller : callers)
+    {
+        caller.get();
+    }
+    EXPECT_EQ(calls.load(), 128);
+    EXPECT_EQ(active.load(), 0);
+    EXPECT_FALSE(overlap.load());
+}
+
+TEST_CASE("logging: concurrent sink and file output preserve complete records in matching order")
+{
+    std::vector<std::string> messages;
+    LoggerGuard guard;
+    const std::string dir = "/tmp/opencode/oatpp-backend-logtest-concurrent";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    auto& logger = logging::Logger::instance();
+    logger.setLogFileDirectory(dir);
+    logger.configure(logging::Level::Info,
+                     [&](logging::Level, const std::string&, const std::string& message)
+                     {
+                         messages.push_back(message);
+                     });
+
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<void>> callers;
+    for (int i = 0; i < 8; ++i)
+    {
+        callers.push_back(std::async(std::launch::async,
+                                     [&, i]
+                                     {
+                                         ready.wait();
+                                         for (int j = 0; j < 16; ++j)
+                                         {
+                                             logging::logInfo("concurrent", std::to_string(i) + ":" +
+                                                                                std::to_string(j) + ":" +
+                                                                                std::string(16384, 'x'));
+                                         }
+                                     }));
+    }
+    start.set_value();
+    for (auto& caller : callers)
+    {
+        caller.get();
+    }
+    EXPECT_EQ(messages.size(), std::size_t{128});
+    std::ifstream file(logging::Logger::resolveLogFilePath(dir), std::ios::binary);
+    std::string line;
+    for (const auto& message : messages)
+    {
+        EXPECT_TRUE(std::getline(file, line));
+        EXPECT_EQ(line.substr(13), "[INFO] [concurrent] " + message);
+    }
+    EXPECT_FALSE(std::getline(file, line));
+    file.close();
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("logging: sinks can access configuration and emit a nested log")
+{
+    std::vector<std::string> messages;
+    LoggerGuard guard;
+    auto& logger = logging::Logger::instance();
+    logger.setLogFileDirectory("");
+    logger.configure(logging::Level::Info,
+                     [&](logging::Level, const std::string&, const std::string& message)
+                     {
+                         messages.push_back(message);
+                         EXPECT_TRUE(logger.isEnabled(logging::Level::Info));
+                         EXPECT_TRUE(logger.minLevel() == logging::Level::Info);
+                         EXPECT_EQ(logger.logFileDirectory(), std::string(""));
+                         if (message == "outer")
+                         {
+                             logger.setMinLevel(logging::Level::Info);
+                             logger.configure(logging::Level::Info,
+                                              [&](logging::Level, const std::string&, const std::string& nested)
+                                              {
+                                                  messages.push_back(nested);
+                                              });
+                             logging::logInfo("reentrant", "inner");
+                         }
+                     });
+    logging::logInfo("reentrant", "outer");
+    EXPECT_EQ(messages.size(), std::size_t{2});
+    EXPECT_EQ(messages[0], std::string("outer"));
+    EXPECT_EQ(messages[1], std::string("inner"));
 }
