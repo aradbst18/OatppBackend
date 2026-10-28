@@ -65,4 +65,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Cla
     apply_app_hardening(private_text_file_tests)
     app_apply_sanitizers(private_text_file_tests)
     add_test(NAME test_private_text_file COMMAND private_text_file_tests)
+
+    if(APP_ENABLE_POSTGRESQL)
+        add_executable(postgresql_local_server_tests test_main.cpp test_postgresql_local_server.cpp)
+        target_link_libraries(postgresql_local_server_tests PRIVATE app_core)
+        target_link_options(
+            postgresql_local_server_tests
+            PRIVATE
+            "-Wl,--wrap=system"
+            "-Wl,--wrap=mkstemp"
+            "-Wl,--wrap=write"
+            "-Wl,--wrap=fchmod"
+            "-Wl,--wrap=close"
+            "-Wl,--wrap=unlink"
+            "-Wl,--wrap=lstat")
+        apply_app_warnings(postgresql_local_server_tests)
+        apply_app_build_type_flags(postgresql_local_server_tests)
+        apply_app_hardening(postgresql_local_server_tests)
+        app_apply_sanitizers(postgresql_local_server_tests)
+        add_test(NAME test_postgresql_local_server COMMAND postgresql_local_server_tests)
+    endif()
 endif()

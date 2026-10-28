@@ -5,6 +5,7 @@
 #endif  // !APP_WITH_POSTGRESQL
 
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "app/errors/AppException.hpp"
@@ -62,6 +64,117 @@ int runCommand(const std::string& cmd)
 
     return rc;
 }
+
+std::filesystem::path initdbPasswordDirectory(const std::string& socketDir)
+{
+    std::error_code error;
+    const auto directory = std::filesystem::canonical(socketDir, error);
+    if (error)
+    {
+        throw errors::database::ConnectionFailed("Cannot resolve initdb password directory '" + socketDir + "'");
+    }
+
+    for (auto current = directory;; current = current.parent_path())
+    {
+        struct stat status{};
+        if (::lstat(current.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
+            (status.st_uid != ::geteuid() && status.st_uid != 0) ||
+            ((status.st_mode & (S_IWGRP | S_IWOTH)) != 0 && (current == directory || (status.st_mode & S_ISVTX) == 0)))
+        {
+            throw errors::database::ConnectionFailed(
+                "Unsafe initdb password directory '" + current.string() +
+                "': require application or root ownership and no untrusted write access");
+        }
+        // A trusted sticky ancestor (e.g. /tmp) protects its trusted owner's child from replacement.
+        if (current == current.root_path())
+        {
+            return directory;
+        }
+    }
+}
+
+class InitdbPasswordFile
+{
+public:
+    explicit InitdbPasswordFile(const std::filesystem::path& directory) : path_((directory / ".initpw.XXXXXX").string())
+    {
+        descriptor_ = ::mkstemp(path_.data());
+        if (descriptor_ < 0)
+        {
+            throw errors::database::ConnectionFailed("Cannot create initdb password file in '" + directory.string() +
+                                                     "'");
+        }
+    }
+
+    InitdbPasswordFile(const InitdbPasswordFile&) = delete;
+    InitdbPasswordFile& operator=(const InitdbPasswordFile&) = delete;
+
+    ~InitdbPasswordFile() noexcept
+    {
+        const bool closeFailed = descriptor_ >= 0 && ::close(descriptor_) != 0;
+        const bool removeFailed = !removed_ && ::unlink(path()) != 0;
+        if (closeFailed || removeFailed)
+        {
+            try
+            {
+                logging::logWarn("database", std::string("initdb password file cleanup failed for '") + path() + "'");
+            }
+            catch (...)
+            {
+                // Cleanup must preserve the original provisioning error even if logging fails.
+            }
+        }
+    }
+
+    const char* path() const noexcept
+    {
+        return path_.c_str();
+    }
+
+    void write(const std::string& password)
+    {
+        // mkstemp starts private; fchmod also restores owner access under a restrictive umask.
+        if (::fchmod(descriptor_, S_IRUSR | S_IWUSR) != 0)
+        {
+            throw errors::database::ConnectionFailed("Cannot restrict initdb password file permissions");
+        }
+        std::size_t written = 0;
+        while (written < password.size())
+        {
+            const ssize_t count = ::write(descriptor_, password.data() + written, password.size() - written);
+            if (count < 0 && errno == EINTR)
+            {
+                continue;
+            }
+            if (count <= 0)
+            {
+                throw errors::database::ConnectionFailed("Cannot write initdb password file");
+            }
+            written += static_cast<std::size_t>(count);
+        }
+        const int result = ::close(descriptor_);
+        descriptor_ = -1;
+        if (result != 0)
+        {
+            throw errors::database::ConnectionFailed("Cannot close initdb password file");
+        }
+    }
+
+    void remove()
+    {
+        if (::unlink(path()) != 0)
+        {
+            throw errors::database::ConnectionFailed("Cannot remove initdb password file '" + std::string(path()) +
+                                                     "'");
+        }
+        removed_ = true;
+    }
+
+private:
+    std::string path_;
+    int descriptor_ = -1;
+    bool removed_ = false;
+};
 
 std::string quoteIdentifier(const std::string& name)
 {
@@ -294,29 +407,14 @@ void PostgresqlLocalServer::runInitdb() const
             "' exists but is not initialized (missing PG_VERSION): move it aside and retry");
     }
 
-    // initdb with scram from the start: password via 0600 pwfile so the key
-    // never appears in argv or logs.
-    const std::string pwfile = socketDir_ + "/.initpw.tmp";
-    {
-        std::ofstream out(pwfile, std::ios::trunc);
-        if (!out)
-        {
-            throw errors::database::ConnectionFailed("Cannot write initdb pwfile in '" + socketDir_ + "'");
-        }
-
-        out << key_;
-    }
-
-    std::error_code ec;
-    std::filesystem::permissions(pwfile, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, ec);
-    (void)ec;
+    InitdbPasswordFile pwfile(initdbPasswordDirectory(socketDir_));
+    pwfile.write(key_);
 
     const std::string cmd = shellQuote(bins.initdb) + " -D " + shellQuote(pgdata) +
-                            " -U postgres --auth=scram-sha-256 --pwfile=" + shellQuote(pwfile);
+                            " -U postgres --auth=scram-sha-256 --pwfile=" + shellQuote(pwfile.path());
     const int rc = runCommand(cmd);
 
-    std::filesystem::remove(pwfile, ec);
-    (void)ec;
+    pwfile.remove();
 
     if (rc != 0)
     {

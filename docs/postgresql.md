@@ -67,7 +67,7 @@ When running in PostgreSQL mode (`APP_USERS_DATABASE_TYPE=POSTGRESQL`), the appl
    - Checks if a PostgreSQL cluster exists at `<database.path>/pgdata/PG_VERSION`.
    - **If cluster is missing**:
      - Verifies the configured TCP port (`5433`) is not occupied by an alien process.
-     - Runs `initdb` with `--auth=scram-sha-256` using a secure temporary password file (`0600` permissions) so credentials are never visible in process lists.
+     - Runs `initdb` with `--auth=scram-sha-256` using an atomically created, uniquely named temporary password file (`0600` permissions) so credentials are never visible in process lists. The file is closed before `initdb` runs and removed on completion or C++ exception; cleanup errors are reported.
      - Starts the server via `pg_ctl` with socket directory set to `database.path` and logs written to `<database.path>/pg.log`.
      - Creates the configured user role (`oatpp_tester`) with password and provisions the application database (`oatpp_backend`).
    - **If cluster exists but is stopped**:
@@ -76,6 +76,10 @@ When running in PostgreSQL mode (`APP_USERS_DATABASE_TYPE=POSTGRESQL`), the appl
      - Reuses the running instance and proceeds directly to schema validation.
 2. **Shutdown Phase (`Application::stop`)**:
    - Gracefully stops the managed server with `pg_ctl stop -m fast` if the instance was spawned by the application process.
+
+Initial provisioning requires `database.path` and its resolved ancestors to be owned by the application account or root. The socket directory must not be writable by group or other users; writable ancestors are accepted only when the sticky bit protects their entries (for example, `/tmp`). Unsafe paths are rejected before writing a password, without changing existing permissions. With a permissive umask, pre-create the socket directory with mode `0700` under trusted parents. These checks apply when creating a cluster; existing clusters keep their current startup behavior.
+
+Cleanup covers normal completion and C++ exception unwinding. Forced termination or an operating-system refusal to delete can leave an owner-only password file behind; cleanup warnings identify the path without logging its contents.
 
 ---
 
