@@ -5,6 +5,12 @@
 namespace app::application
 {
 
+namespace
+{
+// Self-calls must be recognized without touching thread_ while an owner joins it.
+thread_local const ManagedThread* currentWorker = nullptr;
+}  // namespace
+
 ManagedThread::ManagedThread(std::string name, Work work) : name_(std::move(name)), work_(std::move(work))
 {
 }
@@ -16,35 +22,52 @@ ManagedThread::~ManagedThread()
 
 void ManagedThread::start()
 {
-    bool expected = false;
-    if (!running_.compare_exchange_strong(expected, true))
+    if (currentWorker == this)
     {
-        return;  // already running
+        return;
     }
 
+    std::unique_lock<std::mutex> lock(lifecycleMutex_);
+    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    if (running_.load())
+    {
+        return;
+    }
+    if (thread_.joinable())
+    {
+        thread_.join();
+    }
     stopRequested_.store(false);
-    Work work = work_;
-    std::string name = name_;
-    thread_ = std::thread(
-        [work, name, this]()
-        {
-            logging::logInfo("threads", "Thread '" + name + "' started");
-            try
+    running_.store(true);
+    try
+    {
+        thread_ = std::thread(
+            [work = work_, name = name_, this]()
             {
-                work(stopRequested_);
-            }
-            catch (const std::exception& ex)
-            {
-                logging::logError("threads", "Thread '" + name + "' failed: " + ex.what());
-            }
-            catch (...)
-            {
-                logging::logError("threads", "Thread '" + name + "' failed with unknown exception");
-            }
+                currentWorker = this;
+                logging::logInfo("threads", "Thread '" + name + "' started");
+                try
+                {
+                    work(stopRequested_);
+                }
+                catch (const std::exception& ex)
+                {
+                    logging::logError("threads", "Thread '" + name + "' failed: " + ex.what());
+                }
+                catch (...)
+                {
+                    logging::logError("threads", "Thread '" + name + "' failed with unknown exception");
+                }
 
-            running_.store(false);
-            logging::logInfo("threads", "Thread '" + name + "' stopped");
-        });
+                running_.store(false);
+                logging::logInfo("threads", "Thread '" + name + "' stopped");
+            });
+    }
+    catch (...)
+    {
+        running_.store(false);
+        throw;
+    }
 }
 
 void ManagedThread::requestStop() noexcept
@@ -54,24 +77,55 @@ void ManagedThread::requestStop() noexcept
 
 void ManagedThread::stop()
 {
+    if (currentWorker == this)
+    {
+        requestStop();
+        return;
+    }
+
+    std::unique_lock<std::mutex> lock(lifecycleMutex_);
     requestStop();
-    join();
+    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    // A waiting start() may have reset the flag while another caller was joining.
+    requestStop();
+    joinLocked(lock);
 }
 
 void ManagedThread::join()
 {
-    if (thread_.joinable())
+    if (currentWorker == this)
     {
-        // Never join from the worker itself (would deadlock/terminate).
-        if (std::this_thread::get_id() == thread_.get_id())
-        {
-            return;
-        }
-
-        thread_.join();
+        return;
     }
 
-    running_.store(false);
+    std::unique_lock<std::mutex> lock(lifecycleMutex_);
+    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    joinLocked(lock);
+}
+
+void ManagedThread::joinLocked(std::unique_lock<std::mutex>& lock)
+{
+    if (!thread_.joinable())
+    {
+        return;
+    }
+
+    joining_ = true;
+    lock.unlock();  // Let stop() signal the worker while join() waits for it.
+    try
+    {
+        thread_.join();
+    }
+    catch (...)
+    {
+        lock.lock();
+        joining_ = false;
+        lifecycleCv_.notify_all();
+        throw;
+    }
+    lock.lock();
+    joining_ = false;
+    lifecycleCv_.notify_all();
 }
 
 bool ManagedThread::isRunning() const noexcept

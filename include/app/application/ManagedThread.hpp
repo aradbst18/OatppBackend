@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -14,8 +16,11 @@ namespace app::application
  * Rules (see docs/architecture.md):
  * - The owner creates the thread via start(), owns it, and joins it in
  *   stop()/destructor. Detach is never used.
- * - The work function must poll `stopRequested()` and return promptly.
- * - stop() is idempotent and safe to call from any thread except the worker.
+ * - The work function must poll its stopRequested argument and return promptly.
+ * - start()/stop()/join() are serialized; join() alone does not request a stop.
+ * - On the worker, start()/join() are no-ops and stop() only requests a stop.
+ * - The owner must outlive the work and all lifecycle callers; destruction
+ *   must be external to the worker and must not race with other callers.
  */
 class ManagedThread
 {
@@ -42,8 +47,13 @@ public:
     }
 
 private:
+    void joinLocked(std::unique_lock<std::mutex>& lock);
+
     std::string name_;
     Work work_;
+    std::mutex lifecycleMutex_;
+    std::condition_variable lifecycleCv_;
+    bool joining_{false};
     std::thread thread_;
     std::atomic<bool> stopRequested_{false};
     std::atomic<bool> running_{false};

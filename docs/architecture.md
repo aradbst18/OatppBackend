@@ -99,7 +99,11 @@ services without sockets.
 - HTTP serving is oatpp's internal thread pool (owned by `Server`).
 - Application-owned threads use `ManagedThread` (RAII `std::thread`,
   `start/requestStop/stop/join`, never detached). The worker polls
-  `stopRequested()`. Joining from the worker itself is a safe no-op.
+  its stop-request argument. Lifecycle calls from external threads are serialized;
+  completed workers are joined before restart. Joining releases the lifecycle lock
+  so another caller can request a stop. On the worker, `start()` and `join()` are
+  safe no-ops, and `stop()` only requests a stop. Destruction must be external to
+  the worker, after all other lifecycle callers have finished.
 - `Logger` serializes all writes with a mutex. `IDatabase` implementations
   guard the file database handle with a mutex. `EchoInstanceListener` counts sockets
   with an atomic.

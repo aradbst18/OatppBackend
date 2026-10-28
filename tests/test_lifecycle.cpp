@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <future>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -75,6 +76,190 @@ TEST_CASE("lifecycle: managed thread stop is idempotent")
     worker.stop();
     worker.stop();
 
+    EXPECT_FALSE(worker.isRunning());
+}
+
+TEST_CASE("lifecycle: managed thread restarts after natural completion")
+{
+    std::atomic<int> calls{0};
+    application::ManagedThread worker("short-lived", [&](const std::atomic<bool>&) { ++calls; });
+
+    for (int run = 1; run <= 3; ++run)
+    {
+        worker.start();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (worker.isRunning() && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::yield();
+        }
+        EXPECT_FALSE(worker.isRunning());
+        EXPECT_EQ(calls.load(), run);
+    }
+    worker.join();
+}
+
+TEST_CASE("lifecycle: managed thread recovers from a failing work copy")
+{
+    struct Work
+    {
+        bool& fail;
+        std::atomic<int>& calls;
+
+        Work(bool& shouldFail, std::atomic<int>& count) : fail(shouldFail), calls(count) {}
+        Work(const Work& other) : fail(other.fail), calls(other.calls)
+        {
+            if (fail)
+            {
+                throw std::runtime_error("forced work copy failure");
+            }
+        }
+        void operator()(const std::atomic<bool>&) const { ++calls; }
+    };
+
+    bool fail = false;
+    std::atomic<int> calls{0};
+    application::ManagedThread worker("copy-failure", Work(fail, calls));
+    fail = true;
+    EXPECT_THROW_AS(worker.start(), std::runtime_error);
+    EXPECT_FALSE(worker.isRunning());
+    EXPECT_EQ(calls.load(), 0);
+
+    fail = false;
+    worker.start();
+    worker.join();
+    EXPECT_EQ(calls.load(), 1);
+    EXPECT_FALSE(worker.isRunning());
+}
+
+TEST_CASE("lifecycle: concurrent managed thread starts launch only one worker")
+{
+    std::atomic<int> calls{0};
+    application::ManagedThread worker("concurrent-start", [&](const std::atomic<bool>& stop)
+                                     {
+                                         ++calls;
+                                         while (!stop.load())
+                                         {
+                                             std::this_thread::yield();
+                                         }
+                                     });
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<void>> callers;
+    for (int i = 0; i < 12; ++i)
+    {
+        callers.push_back(std::async(std::launch::async, [&] { ready.wait(); worker.start(); }));
+    }
+    start.set_value();
+    for (auto& caller : callers)
+    {
+        caller.get();
+    }
+    worker.stop();
+    EXPECT_EQ(calls.load(), 1);
+    EXPECT_FALSE(worker.isRunning());
+}
+
+TEST_CASE("lifecycle: managed thread serializes concurrent start stop and join")
+{
+    std::atomic<int> active{0};
+    std::atomic<bool> overlap{false};
+    application::ManagedThread worker("lifecycle-race", [&](const std::atomic<bool>& stop)
+                                     {
+                                         if (active.fetch_add(1) != 0)
+                                         {
+                                             overlap.store(true);
+                                         }
+                                         // A join may follow the last stop and wait on a fresh run.
+                                         for (int tick = 0; tick < 500 && !stop.load(); ++tick)
+                                         {
+                                             std::this_thread::yield();
+                                         }
+                                         --active;
+                                     });
+    for (int round = 0; round < 20; ++round)
+    {
+        worker.start();
+        std::promise<void> start;
+        const auto ready = start.get_future().share();
+        std::vector<std::future<void>> callers;
+        for (int i = 0; i < 12; ++i)
+        {
+            callers.push_back(std::async(std::launch::async, [&, i]
+                                         {
+                                             ready.wait();
+                                             if (i % 3 == 0)
+                                                 worker.start();
+                                             else if (i % 3 == 1)
+                                                 worker.stop();
+                                             else
+                                                 worker.join();
+                                         }));
+        }
+        start.set_value();
+        for (auto& caller : callers)
+        {
+            caller.get();
+        }
+        worker.stop();
+        EXPECT_FALSE(worker.isRunning());
+    }
+    EXPECT_EQ(active.load(), 0);
+    EXPECT_FALSE(overlap.load());
+}
+
+TEST_CASE("lifecycle: managed thread stop can signal during an external join")
+{
+    std::promise<void> entered;
+    bool expired = false;
+    application::ManagedThread worker("join-then-stop", [&](const std::atomic<bool>& stop)
+                                     {
+                                         entered.set_value();
+                                         const auto deadline = std::chrono::steady_clock::now() +
+                                                               std::chrono::seconds(2);
+                                         while (!stop.load())
+                                         {
+                                             if (std::chrono::steady_clock::now() >= deadline)
+                                             {
+                                                 expired = true;
+                                                 break;
+                                             }
+                                             std::this_thread::yield();
+                                         }
+                                     });
+    worker.start();
+    entered.get_future().wait();
+    auto joiner = std::async(std::launch::async, [&] { worker.join(); });
+    const auto status = joiner.wait_for(std::chrono::milliseconds(20));
+    worker.stop();
+    joiner.get();
+    EXPECT_TRUE(status == std::future_status::timeout);
+    EXPECT_FALSE(expired);
+    EXPECT_FALSE(worker.isRunning());
+}
+
+TEST_CASE("lifecycle: managed thread self calls do not block an external join")
+{
+    std::promise<void> entered;
+    std::promise<void> release;
+    const auto ready = release.get_future().share();
+    bool stopObserved = false;
+    application::ManagedThread worker("self-calls", [&](const std::atomic<bool>& stop)
+                                     {
+                                         entered.set_value();
+                                         ready.wait();
+                                         worker.start();
+                                         worker.join();
+                                         worker.stop();
+                                         stopObserved = stop.load();
+                                     });
+    worker.start();
+    entered.get_future().wait();
+    auto joiner = std::async(std::launch::async, [&] { worker.join(); });
+    const auto status = joiner.wait_for(std::chrono::milliseconds(20));
+    release.set_value();
+    joiner.get();
+    EXPECT_TRUE(status == std::future_status::timeout);
+    EXPECT_TRUE(stopObserved);
     EXPECT_FALSE(worker.isRunning());
 }
 
