@@ -456,7 +456,12 @@ TEST_CASE("config: yaml roundtrip")
 {
     const std::string path = tmpPath("cfg.yaml");
     config::YamlConfigStore store;
-    store.save(path, validSettings());
+    config::AppSettings settings = validSettings();
+    settings.jwtIssuer = "null";
+#ifdef APP_DATABASE_POSTGRESQL
+    settings.databaseName = "1234";
+#endif  // APP_DATABASE_POSTGRESQL
+    store.save(path, settings);
 
     const config::AppSettings loaded = store.load(path);
 
@@ -464,11 +469,12 @@ TEST_CASE("config: yaml roundtrip")
     EXPECT_EQ(loaded.port, 8080);
 
 #ifdef APP_DATABASE_POSTGRESQL
-    EXPECT_EQ(loaded.databaseName, std::string("app_test_db"));
+    EXPECT_EQ(loaded.databaseName, std::string("1234"));
     EXPECT_EQ(loaded.databasePort, 5433);
 #endif  // APP_DATABASE_POSTGRESQL
 
     EXPECT_EQ(loaded.jwtSecret, std::string("test-secret-123456789012345678901234"));
+    EXPECT_EQ(loaded.jwtIssuer, std::string("null"));
     EXPECT_EQ(loaded.jwtTtlSeconds, 60);
     EXPECT_EQ(loaded.logLevel, std::string("WARN"));
     EXPECT_EQ(loaded.logPath, std::string("/tmp/opencode/oatpp-backend-logs"));

@@ -105,7 +105,31 @@ DocumentValue fromYamlNode(const YAML::Node& node, const std::string& source)
     {
         try
         {
-            return scalarFromString(node.as<std::string>());
+            const std::string& text = node.Scalar();
+            const std::string& tag = node.Tag();
+            if (tag == "tag:yaml.org,2002:null")
+            {
+                if (!YAML::IsNullString(text.data(), text.size()))
+                {
+                    throw YAML::BadConversion(node.Mark());
+                }
+                return DocumentValue::null();
+            }
+            if (tag == "tag:yaml.org,2002:bool")
+            {
+                return DocumentValue(node.as<bool>());
+            }
+            if (tag == "tag:yaml.org,2002:int")
+            {
+                return DocumentValue(node.as<std::int64_t>());
+            }
+            if (tag == "tag:yaml.org,2002:float")
+            {
+                return DocumentValue(node.as<double>());
+            }
+
+            // yaml-cpp marks implicit scalars with "?" and quoted/block strings with "!".
+            return tag == "?" ? scalarFromString(text) : DocumentValue(text);
         }
         catch (const YAML::Exception& ex)
         {
@@ -161,7 +185,7 @@ void emitYamlValue(YAML::Emitter& out, const DocumentValue& value, const std::st
             out << value.asDouble();
             return;
         case DocumentValue::Type::String:
-            out << value.asString();
+            out << YAML::DoubleQuoted << value.asString();
             return;
         case DocumentValue::Type::List:
         {

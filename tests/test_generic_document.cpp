@@ -203,7 +203,11 @@ TEST_CASE("generic: xml parses and serializes arbitrary documents")
 #ifdef APP_WITH_YAML_PARSER
 TEST_CASE("generic: yaml parses and serializes arbitrary documents")
 {
-    const infrastructure::documents::DocumentValue root = sampleDocument();
+    infrastructure::documents::DocumentValue root = sampleDocument();
+    root["strings"] = infrastructure::documents::DocumentValue::List{
+        infrastructure::documents::DocumentValue("1234"), infrastructure::documents::DocumentValue("true"),
+        infrastructure::documents::DocumentValue("null"), infrastructure::documents::DocumentValue("1.5"),
+        infrastructure::documents::DocumentValue("")};
     const std::string text = infrastructure::documents::serializeYaml(root);
 
     const infrastructure::documents::DocumentValue back = infrastructure::documents::parseYaml(text, "<test>");
@@ -220,6 +224,49 @@ TEST_CASE("generic: yaml parses and serializes arbitrary documents")
 
     EXPECT_THROW_AS(infrastructure::documents::parseYaml("host: [unclosed\n  bad indent: :", "<test>"),
                     errors::serialization::ParsingFailed);
+}
+
+TEST_CASE("generic: yaml preserves quoted and explicitly tagged strings")
+{
+    using infrastructure::documents::DocumentValue;
+    using infrastructure::documents::parseYaml;
+    using infrastructure::documents::serializeYaml;
+
+    for (const std::string text : {"1234", "true", "false", "null", "~", "1.5", ""})
+    {
+        for (const std::string& input :
+             {"\"" + text + "\"", "'" + text + "'", "!!str '" + text + "'", "!!str \"" + text + "\""})
+        {
+            const DocumentValue value = parseYaml(input, "<test>");
+            EXPECT_TRUE(value.isString());
+            EXPECT_EQ(value.asString(), text);
+            EXPECT_TRUE(parseYaml(serializeYaml(value), "<test>") == value);
+        }
+    }
+
+    EXPECT_EQ(parseYaml("!!str 1234", "<test>").asString(), std::string("1234"));
+    EXPECT_EQ(parseYaml("!!str null", "<test>").asString(), std::string("null"));
+    EXPECT_EQ(parseYaml("|-\n  true\n", "<test>").asString(), std::string("true"));
+    EXPECT_EQ(parseYaml(">-\n  1234\n", "<test>").asString(), std::string("1234"));
+}
+
+TEST_CASE("generic: yaml preserves implicit types and explicit scalar tags")
+{
+    using infrastructure::documents::DocumentValue;
+    using infrastructure::documents::parseYaml;
+
+    const DocumentValue expected(DocumentValue::List{DocumentValue(1234), DocumentValue(true), DocumentValue(false),
+                                                     DocumentValue::null(), DocumentValue(1.5)});
+    EXPECT_TRUE(parseYaml("[1234, true, false, null, 1.5]", "<test>") == expected);
+    EXPECT_TRUE(parseYaml("[!!int '1234', !!bool 'true', !!bool 'false', !!null 'null', !!float '1.5']", "<test>") ==
+                expected);
+    EXPECT_TRUE(parseYaml("!!float 1234", "<test>").isDouble());
+    EXPECT_TRUE(parseYaml("!!null ''", "<test>").isNull());
+
+    for (const char* input : {"!!int 1.5", "!!bool nope", "!!float nope", "!!null nope"})
+    {
+        EXPECT_THROW_AS(parseYaml(input, "<test>"), errors::serialization::ParsingFailed);
+    }
 }
 #endif  // APP_WITH_YAML_PARSER
 

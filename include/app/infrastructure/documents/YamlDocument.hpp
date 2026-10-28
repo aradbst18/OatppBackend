@@ -10,8 +10,9 @@ namespace app::infrastructure::documents
 
 /**
  * Generic YAML document layer (see JsonDocument for the pattern).
- * Scalars infer Null/Bool/Int/Double/String; sequences become Lists and
- * mappings become Maps. An empty document parses as Null.
+ * Scalars respect YAML string and standard scalar tags; implicit scalars infer
+ * Null/Bool/Int/Double/String. Sequences become Lists and mappings become Maps.
+ * An empty document parses as Null.
  */
 DocumentValue parseYaml(const std::string& text, const std::string& source);
 
