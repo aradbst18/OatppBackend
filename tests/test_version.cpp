@@ -1,8 +1,12 @@
 #include "support/TestRunner.hpp"
 
 #include <cstdio>
+#include <fstream>
+#include <future>
 #include <regex>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "app/config/VersionFile.hpp"
 #include "app/infrastructure/TextFile.hpp"
@@ -72,4 +76,68 @@ TEST_CASE("version: file contains version, release date and startup time")
     EXPECT_TRUE(content.find(info.startupTime) != std::string::npos);
 
     std::remove(path.c_str());
+}
+
+TEST_CASE("version: replacement preserves an already-open reader's snapshot")
+{
+    const std::string path = tmpPath("version-snapshot.conf");
+    const config::VersionInfo previous{"1.2.3", "2026-01-02", "01:02:03"};
+    const config::VersionInfo replacement{"12.34.56", "2026-03-04", "04:05:06"};
+    config::writeVersionFile(path, previous);
+    const std::string original = infrastructure::readTextFile(path);
+    std::ifstream reader(path, std::ios::binary);
+    EXPECT_TRUE(reader.is_open());
+
+    config::writeVersionFile(path, replacement);
+
+    std::ostringstream snapshot;
+    snapshot << reader.rdbuf();
+    const config::VersionInfo current = config::readVersionFile(path);
+    std::remove(path.c_str());
+
+    EXPECT_EQ(snapshot.str(), original);
+    EXPECT_EQ(current.version, replacement.version);
+    EXPECT_EQ(current.releaseDate, replacement.releaseDate);
+    EXPECT_EQ(current.startupTime, replacement.startupTime);
+}
+
+TEST_CASE("version: concurrent startup publishes complete files")
+{
+    for (const bool exists : {false, true})
+    {
+        const std::string path = tmpPath(exists ? "version-existing.conf" : "version-missing.conf");
+        std::remove(path.c_str());
+        if (exists)
+        {
+            config::writeVersionFile(path, config::currentVersionInfo());
+        }
+
+        std::promise<void> start;
+        const auto ready = start.get_future().share();
+        std::vector<std::future<void>> callers;
+        for (int i = 0; i < 12; ++i)
+        {
+            callers.push_back(std::async(std::launch::async,
+                                         [&, ready]()
+                                         {
+                                             ready.wait();
+                                             for (int call = 0; call < 50; ++call)
+                                             {
+                                                 EXPECT_TRUE(config::ensureVersionFile(path).empty());
+                                             }
+                                         }));
+        }
+        start.set_value();
+        for (auto& caller : callers)
+        {
+            caller.get();
+        }
+
+        std::vector<std::string> missing;
+        const config::VersionInfo current = config::readVersionFile(path, &missing);
+        std::remove(path.c_str());
+        EXPECT_TRUE(missing.empty());
+        EXPECT_EQ(current.version, std::string(APP_VERSION));
+        EXPECT_EQ(current.releaseDate, std::string(APP_RELEASE_DATE));
+    }
 }

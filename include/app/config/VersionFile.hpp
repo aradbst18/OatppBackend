@@ -38,7 +38,8 @@ VersionInfo currentVersionInfo();
 /// the main config; only the on-disk syntax follows APP_VERSION_FILE_FORMAT.
 std::string defaultVersionFilePath();
 
-/// Write `info` to `path` in the compile-time-selected version file format.
+/// Atomically write `info` to `path` with owner-only permissions (0600) in
+/// the compile-time-selected version file format.
 /// The matching APP_WITH_*_PARSER define is required (a mismatch fails at
 /// configure time and is re-asserted here).
 void writeVersionFile(const std::string& path, const VersionInfo& info);

@@ -134,7 +134,7 @@ void writeVersionFile(const std::string& path, const VersionInfo& info)
     root["version"] = info.version;
     root["releaseDate"] = info.releaseDate;
     root["startupTime"] = info.startupTime;
-    infrastructure::documents::saveJsonFile(path, root);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeJson(root));
 
 #elif defined(APP_VERSION_FILE_TOML)
 #ifndef APP_WITH_TOML_PARSER
@@ -145,7 +145,7 @@ void writeVersionFile(const std::string& path, const VersionInfo& info)
     root["version"] = info.version;
     root["releaseDate"] = info.releaseDate;
     root["startupTime"] = info.startupTime;
-    infrastructure::documents::saveTomlFile(path, root);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeToml(root));
 
 #elif defined(APP_VERSION_FILE_XML)
 #ifndef APP_WITH_XML_PARSER
@@ -158,7 +158,7 @@ void writeVersionFile(const std::string& path, const VersionInfo& info)
     inner["startupTime"] = info.startupTime;
     infrastructure::documents::DocumentValue document = infrastructure::documents::DocumentValue::makeMap();
     document["appVersion"] = std::move(inner);
-    infrastructure::documents::saveXmlFile(path, document);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeXml(document));
 
 #elif defined(APP_VERSION_FILE_YAML)
 #ifndef APP_WITH_YAML_PARSER
@@ -169,7 +169,7 @@ void writeVersionFile(const std::string& path, const VersionInfo& info)
     root["version"] = info.version;
     root["releaseDate"] = info.releaseDate;
     root["startupTime"] = info.startupTime;
-    infrastructure::documents::saveYamlFile(path, root);
+    infrastructure::writePrivateTextFile(path, infrastructure::documents::serializeYaml(root));
 
 #else
 #error "No APP_VERSION_FILE_* define set (cmake/options.cmake)"
