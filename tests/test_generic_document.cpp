@@ -345,18 +345,7 @@ TEST_CASE("generic: database inspector dumps arbitrary database files")
 TEST_CASE("generic: postgresql inspector dumps server databases")
 {
     const tests::PgTestParams params = tests::pgTestParams();
-    std::string name;
-
-    try
-    {
-        name = tests::makeUniquePgTestDb(params);
-    }
-    catch (const std::exception& ex)
-    {
-        std::cout << "(PostgreSQL test cluster not configured, skipping: " << ex.what() << ") ";
-
-        return;
-    }
+    const std::string name = tests::makeUniquePgTestDb(params);
 
     {
         auto db = std::make_shared<infrastructure::database::PostgresqlDatabase>(params.path, params.port, name,

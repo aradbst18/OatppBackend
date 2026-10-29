@@ -302,8 +302,7 @@ TEST_CASE("private file: startup works below a pre-existing search-only ancestor
 {
     if (::geteuid() == 0)
     {
-        std::cout << "[SKIP] search-only permissions require a non-root test user\n";
-        return;
+        app::tests::skip("search-only permissions require a non-root test user");
     }
     Fixture fixture;
     const auto applicationDirectory = fixture.root / "application";
@@ -488,8 +487,7 @@ TEST_CASE("private file: multi-user sticky directories preserve foreign markers 
 {
     if (::geteuid() != 0)
     {
-        std::cout << "[SKIP] multi-user fixture creation requires root; children run as unprivileged UIDs\n";
-        return;
+        app::tests::skip("multi-user fixture creation requires root; children run as unprivileged UIDs");
     }
     Fixture fixture;
     constexpr uid_t applicationUid = 65532;

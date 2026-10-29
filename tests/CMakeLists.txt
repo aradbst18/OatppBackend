@@ -55,6 +55,19 @@ add_test(NAME app_tests_all COMMAND app_tests)
 # A separate process guarantees the environment has not been initialized by another test.
 add_test(NAME test_environment_first_use COMMAND app_tests "environment:")
 
+add_executable(test_runner_tests test_test_runner.cpp)
+apply_app_warnings(test_runner_tests)
+apply_app_build_type_flags(test_runner_tests)
+apply_app_hardening(test_runner_tests)
+app_apply_sanitizers(test_runner_tests)
+add_test(NAME test_test_runner COMMAND test_runner_tests)
+
+if(APP_ENABLE_POSTGRESQL)
+    add_test(NAME test_postgresql_inspector_unavailable
+             COMMAND ${CMAKE_COMMAND} -DAPP_TESTS=$<TARGET_FILE:app_tests> -P
+                     ${CMAKE_CURRENT_SOURCE_DIR}/test_postgresql_inspector_unavailable.cmake)
+endif()
+
 # Keep syscall fault injection isolated from application/database tests.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_executable(private_text_file_tests test_main.cpp test_private_text_file.cpp)
@@ -86,3 +99,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Cla
         add_test(NAME test_postgresql_local_server COMMAND postgresql_local_server_tests)
     endif()
 endif()
+
+get_property(
+    REGISTERED_TESTS
+    DIRECTORY
+    PROPERTY TESTS)
+set_tests_properties(${REGISTERED_TESTS} PROPERTIES SKIP_RETURN_CODE 77)

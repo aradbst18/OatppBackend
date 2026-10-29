@@ -4,6 +4,7 @@
 // Usage:
 //   #include "support/TestRunner.hpp"
 //   TEST_CASE("suite: description") { EXPECT_TRUE(...); }
+//   app::tests::skip("reason") for an explicitly unavailable optional prerequisite.
 // main() is in test_main.cpp and runs all registered cases.
 
 #include <functional>
@@ -20,6 +21,16 @@ struct Failure : std::runtime_error
 {
     using std::runtime_error::runtime_error;
 };
+
+struct Skipped : std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
+
+[[noreturn]] inline void skip(const std::string& reason)
+{
+    throw Skipped(reason);
+}
 
 struct Case
 {
@@ -61,6 +72,7 @@ inline int run(int argc = 0, char** argv = nullptr)
 
     int passed = 0;
     int failed = 0;
+    int skipped = 0;
     int matched = 0;
 
     for (const auto& c : registry())
@@ -77,6 +89,11 @@ inline int run(int argc = 0, char** argv = nullptr)
             c.func();
             ++passed;
             std::cout << "[PASS] " << c.name << "\n";
+        }
+        catch (const Skipped& ex)
+        {
+            ++skipped;
+            std::cout << "[SKIP] " << c.name << ": " << ex.what() << "\n";
         }
         catch (const Failure& ex)
         {
@@ -101,9 +118,16 @@ inline int run(int argc = 0, char** argv = nullptr)
         return 1;
     }
 
-    std::cout << "----\n" << passed << " passed, " << failed << " failed, " << (passed + failed) << " total\n";
+    std::cout << "----\n"
+              << passed << " passed, " << failed << " failed, " << skipped << " skipped, " << matched << " total\n";
 
-    return failed == 0 ? 0 : 1;
+    if (failed != 0)
+    {
+        return 1;
+    }
+
+    // CTest maps this exit code to Not Run through SKIP_RETURN_CODE.
+    return passed == 0 && skipped != 0 ? 77 : 0;
 }
 
 inline int runAll()

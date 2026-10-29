@@ -2,7 +2,14 @@
 
 Framework: dependency-free harness (`tests/support/TestRunner.hpp`) + CTest.
 No gtest, builds offline. `TEST_CASE("suite: name")`, `EXPECT_TRUE/FALSE/EQ`,
-`EXPECT_THROW_AS`. One binary `app_tests` runs all suites.
+`EXPECT_THROW_AS`. One binary `app_tests` runs all application suites.
+Use `app::tests::skip("reason")` only for an explicitly unavailable optional
+prerequisite. The runner reports `[PASS]`, `[FAIL]`, and `[SKIP]` separately,
+and its total includes skipped cases. Any failure returns exit code 1; a run
+with passed cases and no failures returns 0. A run where every matched case
+skips returns 77, which CTest marks as skipped. An unmatched filter still fails.
+The standalone `test_runner_tests` binary verifies these reporting rules without
+application or database dependencies.
 Linux GNU/Clang builds also run `private_text_file_tests`, which wraps `fsync`
 to verify publication and new-parent syncing, interrupted-call retries,
 and failure propagation without affecting the database tests. A non-root permission
@@ -56,7 +63,10 @@ Builds with `APP_ENABLE_POSTGRESQL=ON` link libpq; builds with
 `APP_USERS_DATABASE_TYPE=POSTGRESQL` additionally require a reachable
 server for every test run (the users table lives there). File-users
 builds only need the server for the `postgres inspector` cases in
-`test_generic_document.cpp`. Connection parameters come from the
+`test_generic_document.cpp`. When the inspector test is selected, its server is
+required: connection, authentication, and database-creation failures fail the
+test. Disable PostgreSQL support for builds that do not need this coverage;
+provisioning exceptions never count as skips. Connection parameters come from the
 environment with local-throwaway defaults. Full-application PostgreSQL tests
 require a private `PGPASSWORD`; the old published `oatpp_test_pw` is rejected
 by application configuration validation:
