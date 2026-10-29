@@ -35,34 +35,52 @@ jobs:
             libssl-dev \
             zlib1g-dev \
             libsqlcipher-dev \
+            libsqlite3-dev \
             libpq-dev \
-            postgresql \
-            libjsoncpp-dev \
-            libyaml-cpp-dev \
-            libpugixml-dev
+            postgresql
 
-      - name: Cache Oat++ installation
-        id: cache-oatpp
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/include/oatpp-1.3.0
-          key: oatpp-1.3.0-ubuntu-22.04
-
-      - name: Install Oat++ modules
-        if: steps.cache-oatpp.outputs.cache-hit != 'true'
+      - name: Install pinned CMake dependencies
         run: |
-          git clone --depth 1 --branch 1.3.0-latest https://github.com/oatpp/oatpp.git
-          cmake -B oatpp/build -S oatpp -DCMAKE_BUILD_TYPE=Release -DOATPP_BUILD_TESTS=OFF
-          sudo cmake --build oatpp/build --target install --parallel $(nproc)
-
-          for mod in oatpp-swagger oatpp-zlib oatpp-sqlite oatpp-postgresql; do
-            git clone --depth 1 --branch 1.3.0-latest https://github.com/oatpp/${mod}.git
-            cmake -B ${mod}/build -S ${mod} -DCMAKE_BUILD_TYPE=Release -DOATPP_BUILD_TESTS=OFF
-            sudo cmake --build ${mod}/build --target install --parallel $(nproc)
+          deps_root="$RUNNER_TEMP/cmake-dependencies"
+          deps_prefix="$deps_root/install"
+          mkdir -p "$deps_root"
+          for archive in \
+            oatpp-1.3.0-latest \
+            oatpp-swagger-1.3.1 \
+            oatpp-zlib-1.3.0-latest \
+            oatpp-sqlite-1.3.0-latest \
+            oatpp-postgresql-1.3.0-latest \
+            jsoncpp-1.9.8 \
+            pugixml-1.16 \
+            toml11-4.4.0 \
+            yaml-cpp-yaml-cpp-0.9.0 \
+            jwt-cpp-v0.7.2; do
+            deps_source="$deps_root/$archive"
+            mkdir -p "$deps_source"
+            cmake -E chdir "$deps_source" cmake -E tar xf "$GITHUB_WORKSPACE/dependencies/$archive.zip"
+            if [ -f "$deps_source/$archive/CMakeLists.txt" ]; then
+              deps_source="$deps_source/$archive"
+            fi
+            deps_options=(-DBUILD_SHARED_LIBS=OFF)
+            case "$archive" in
+              oatpp-*) deps_options+=(-DOATPP_BUILD_TESTS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5) ;;
+              jsoncpp-*) deps_options+=(-DJSONCPP_WITH_TESTS=OFF -DBUILD_OBJECT_LIBS=OFF) ;;
+              yaml-cpp-*) deps_options+=(-DYAML_CPP_BUILD_TOOLS=OFF) ;;
+              jwt-cpp-*)
+                # Upstream v0.7.2 exports a stale CMake package version.
+                sed -i 's/VERSION 0\.7\.1/VERSION 0.7.2/' "$deps_source/CMakeLists.txt"
+                deps_options+=(-DJWT_BUILD_EXAMPLES=OFF)
+                ;;
+            esac
+            cmake -S "$deps_source" -B "$deps_source/build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps_prefix" \
+              -DCMAKE_PREFIX_PATH="$deps_prefix" "${deps_options[@]}"
+            cmake --build "$deps_source/build" --parallel "$(nproc)"
+            cmake --install "$deps_source/build"
           done
 
       - name: Configure CMake
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/cmake-dependencies/install"
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel $(nproc)

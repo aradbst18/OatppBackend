@@ -58,7 +58,7 @@ endif()
 
 # Config parsers are only searched when enabled, so a disabled parser's dependency is never required, built, or linked.
 if(APP_ENABLE_JSON_PARSER)
-    find_package(jsoncpp 1.9.6 EXACT REQUIRED)
+    find_package(jsoncpp 1.9.8 EXACT REQUIRED)
 endif()
 
 if(APP_ENABLE_TOML_PARSER)
@@ -66,7 +66,7 @@ if(APP_ENABLE_TOML_PARSER)
 endif()
 
 if(APP_ENABLE_XML_PARSER)
-    find_package(pugixml 1.15 EXACT REQUIRED)
+    find_package(pugixml 1.16 EXACT REQUIRED)
 endif()
 
 if(APP_ENABLE_YAML_PARSER)

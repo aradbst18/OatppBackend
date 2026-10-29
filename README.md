@@ -26,11 +26,14 @@ Full detail: [`docs/architecture.md`](docs/architecture.md). New endpoints:
   `APP_ENABLE_ZLIB=ON`)
 - `oatpp-websocket` 1.3.0 is built offline from the bundled archive with a
   continuation-frame correction; no system installation is needed.
-- `jwt-cpp` 0.7.2, `jsoncpp` 1.9.6, `pugixml` 1.15, `toml11` 4.4.0
+- `jwt-cpp` 0.7.2, `jsoncpp` 1.9.8, `pugixml` 1.16, `toml11` 4.4.0,
+  `yaml-cpp` 0.9.0
 - SQLCipher dev (the file database library; opens plaintext files too)
 
 Other dependencies are discovered at configure time — `find_package`, plus
 `pkg_check_modules` for SQLCipher (see [`docs/cmake.md`](docs/cmake.md)).
+CI builds the pinned CMake dependencies from the bundled archives into a
+job-local prefix and installs system libraries through apt.
 
 ## Build instructions
 
