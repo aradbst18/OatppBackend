@@ -8,8 +8,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
+#include "oatpp/web/server/HttpRouter.hpp"
 #include "oatpp/web/server/interceptor/RequestInterceptor.hpp"
 
 #include "app/infrastructure/ClientIpResolver.hpp"
@@ -65,7 +65,7 @@ private:
     size_t maxClients_;
     infrastructure::ClientIpResolver clientIpResolver_;
     Now now_;
-    std::unordered_set<std::string> protectedEndpoints_;
+    oatpp::web::server::HttpRouterTemplate<std::string> protectedEndpoints_;
 
     std::mutex mutex_;
     // Ordered by last accepted request; rejection never extends an entry's lifetime.

@@ -21,7 +21,8 @@ namespace
 {
 
 std::shared_ptr<RateLimitInterceptor::IncomingRequest> requestWithPeer(
-    const char* peer, const oatpp::web::protocol::http::Headers& headers = {})
+    const char* peer, const oatpp::web::protocol::http::Headers& headers = {}, const char* path = "/auth/login",
+    const char* method = "POST")
 {
     using ExtendedConnection = oatpp::network::tcp::server::ConnectionProvider::ExtendedConnection;
     oatpp::data::stream::Context::Properties properties;
@@ -43,13 +44,51 @@ std::shared_ptr<RateLimitInterceptor::IncomingRequest> requestWithPeer(
         throw;
     }
     oatpp::web::protocol::http::RequestStartingLine line;
-    line.method = "POST";
-    line.path = "/auth/login";
+    line.method = method;
+    line.path = path;
     line.protocol = "HTTP/1.1";
     return RateLimitInterceptor::IncomingRequest::createShared(connection, line, headers, nullptr, nullptr);
 }
 
 }  // namespace
+
+TEST_CASE("rate_limit: routed aliases share endpoint quotas and fail closed")
+{
+    RateLimitInterceptor::Clock::time_point now{};
+    RateLimitInterceptor::Options options;
+    options.maxRequests = 1;
+    RateLimitInterceptor limiter(options,
+                                 [&now]
+                                 {
+                                     return now;
+                                 });
+    limiter.addProtectedEndpoint("POST /custom/login");
+    for (const char* invalid : {"", "POST", " /auth/login", "POST "})
+    {
+        EXPECT_THROW_AS(limiter.addProtectedEndpoint(invalid), std::invalid_argument);
+    }
+
+    for (const std::string endpoint : {"/auth/login", "/auth/refresh", "/custom/login"})
+    {
+        const std::vector<std::string> aliases = {endpoint,           endpoint + "?probe=1", endpoint + "?probe=2",
+                                                  endpoint + "?",     endpoint + "/",        "/" + endpoint,
+                                                  endpoint.substr(1), endpoint + "//"};
+        EXPECT_TRUE(limiter.intercept(requestWithPeer("192.0.2.7", {}, aliases[1].c_str())) == nullptr);
+        for (const auto& alias : aliases)
+        {
+            EXPECT_THROW_AS(limiter.intercept(requestWithPeer("192.0.2.7", {}, alias.c_str())),
+                            app::errors::ratelimit::Exceeded);
+            EXPECT_THROW_AS(limiter.intercept(requestWithPeer(nullptr, {}, alias.c_str())),
+                            app::errors::ratelimit::Exceeded);
+        }
+        EXPECT_TRUE(limiter.intercept(requestWithPeer("192.0.2.8", {}, endpoint.c_str())) == nullptr);
+        EXPECT_TRUE(limiter.intercept(requestWithPeer("192.0.2.7", {}, endpoint.c_str(), "GET")) == nullptr);
+        EXPECT_TRUE(limiter.intercept(requestWithPeer("192.0.2.7", {}, (endpoint + "-evil").c_str())) == nullptr);
+    }
+
+    now += options.window;
+    EXPECT_TRUE(limiter.intercept(requestWithPeer("192.0.2.7", {}, "/auth/login?after-expiry")) == nullptr);
+}
 
 TEST_CASE("rate_limit: ignores forwarding from untrusted peers and normalizes IPs")
 {

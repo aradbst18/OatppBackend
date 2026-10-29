@@ -138,6 +138,10 @@ in a sliding 60-second window, per application process. The accepted connection'
 peer IP identifies direct clients; source ports and forwarding headers do not
 create new quotas. IPv4-mapped IPv6 addresses normalize to IPv4.
 
+Endpoint matching follows the HTTP router's rules. Query strings and accepted
+slash variants share the registered endpoint's quota, and login/refresh remain
+public for those variants. Changing a query parameter cannot reset the quota.
+
 `server.trustedProxies` is an optional comma-separated string of **literal IP
 addresses**, for example `"192.0.2.10, 2001:db8::10"`. Its default is empty:
 no proxy is trusted, including loopback. Hostnames, wildcards and CIDRs are

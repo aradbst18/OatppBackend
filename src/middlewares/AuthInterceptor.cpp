@@ -15,18 +15,20 @@ AuthInterceptor::AuthInterceptor(std::shared_ptr<services::AuthService> authServ
         throw errors::internal::OperationFailed("AuthInterceptor requires AuthService");
     }
 
-    publicPaths_ = {
-        "POST /auth/login", "POST /auth/refresh", "GET /ws/echo",
+    publicPaths_ = oatpp::web::server::HttpRouterTemplate<bool>::createShared();
+    publicPaths_->route("POST", "/auth/login", true);
+    publicPaths_->route("POST", "/auth/refresh", true);
+    publicPaths_->route("GET", "/ws/echo", true);
 #ifdef APP_WITH_SWAGGER
-        "GET /swagger/*",   "GET /api-docs/*",    "GET /swagger/ui",
+    publicPaths_->route("GET", "/swagger/*", true);
+    publicPaths_->route("GET", "/api-docs/*", true);
+    publicPaths_->route("GET", "/swagger/ui", true);
 #endif  // APP_WITH_SWAGGER
-    };
 }
 
 bool AuthInterceptor::isPublicPath(const std::string& method, const std::string& path) const
 {
-    const std::string key = method + " " + path;
-    if (publicPaths_.count(key) != 0)
+    if (publicPaths_->getRoute(oatpp::String(method), oatpp::String(path)))
     {
         return true;
     }

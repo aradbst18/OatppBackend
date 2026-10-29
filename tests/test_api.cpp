@@ -509,16 +509,30 @@ TEST_CASE("api: interceptor public/private classification")
     EXPECT_FALSE(interceptor.isPublicPath("GET", "/auth/who-am-i"));
     EXPECT_FALSE(interceptor.isPublicPath("POST", "/auth/login-evil"));
     EXPECT_TRUE(interceptor.isPublicPath("POST", "/auth/refresh"));
+
+    for (const std::string endpoint : {"/auth/login", "/auth/refresh"})
+    {
+        for (const auto& alias : {endpoint + "?probe=1", endpoint + "?", endpoint + "/", "/" + endpoint,
+                                  endpoint.substr(1), endpoint + "//"})
+        {
+            EXPECT_TRUE(interceptor.isPublicPath("POST", alias));
+            EXPECT_FALSE(interceptor.isPublicPath("GET", alias));
+        }
+        EXPECT_FALSE(interceptor.isPublicPath("POST", endpoint + "-evil?probe=1"));
+        EXPECT_FALSE(interceptor.isPublicPath("POST", endpoint + "%3fprobe=1"));
+    }
+    EXPECT_FALSE(interceptor.isPublicPath("GET", "/auth/who-am-i?probe=1"));
+    EXPECT_FALSE(interceptor.isPublicPath("POST", "/auth/%6cogin"));
 }
 
-TEST_CASE("api: refresh token endpoint roundtrip and rotation")
+TEST_CASE("api: refresh token endpoint roundtrip and rotation with query parameters")
 {
     auto srv = startServer();
 
     // 1. Login
     const std::string loginPayload = R"({"username":"admin","password":"TestAdmin8391"})";
     const std::string loginReq =
-        "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
+        "POST /auth/login?probe=1 HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(loginPayload.size()) + "\r\nConnection: close\r\n\r\n" + loginPayload;
     const std::string loginResp = httpRoundTrip("127.0.0.1", srv->port, loginReq);
     EXPECT_EQ(statusOf(loginResp), 200);
@@ -535,7 +549,7 @@ TEST_CASE("api: refresh token endpoint roundtrip and rotation")
     // 2. Refresh with refresh token
     const std::string refreshPayload = R"({"refresh_token":")" + refreshToken + R"("})";
     const std::string refreshReq =
-        "POST /auth/refresh HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
+        "POST /auth/refresh?probe=1 HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(refreshPayload.size()) + "\r\nConnection: close\r\n\r\n" + refreshPayload;
     const std::string refreshResp = httpRoundTrip("127.0.0.1", srv->port, refreshReq);
     EXPECT_EQ(statusOf(refreshResp), 200);
@@ -749,6 +763,41 @@ TEST_CASE("api: rate limiter blocks requests exceeding threshold with 429")
     const std::string blockedResp = httpRoundTrip("127.0.0.1", srv->port, req);
     EXPECT_EQ(statusOf(blockedResp), 429);
     EXPECT_TRUE(bodyOf(blockedResp).find("Rate limit exceeded") != std::string::npos);
+}
+
+TEST_CASE("api: rate limiter combines login and refresh URL aliases into their endpoint quotas")
+{
+    auto srv = startServer();
+    const auto token = loginAndGetToken("127.0.0.1", srv->port);
+
+    for (const std::string endpoint : {"/auth/login", "/auth/refresh"})
+    {
+        const std::string payload = endpoint == "/auth/login" ? R"({"username":"admin","password":"WrongPassword123"})"
+                                                              : R"({"refresh_token":"invalid-refresh-token"})";
+        const std::vector<std::string> aliases = {
+            endpoint,           endpoint + "?probe=1", endpoint + "?probe=2",
+            endpoint + "?",     endpoint + "/",        "/" + endpoint,
+            endpoint.substr(1), endpoint + "//",       "/auth//" + endpoint.substr(endpoint.rfind('/') + 1)};
+        auto post = [&](const std::string& target, const char* peer)
+        {
+            const std::string request =
+                "POST " + target + " HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+                "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(payload.size()) +
+                "\r\nConnection: close\r\n\r\n" + payload;
+            return statusOf(httpRoundTrip("127.0.0.1", srv->port, request, peer));
+        };
+
+        for (size_t attempt = 0; attempt < 10; ++attempt)
+        {
+            EXPECT_EQ(post(aliases[attempt % aliases.size()], "127.0.0.2"), 401);
+        }
+        for (const auto& alias : aliases)
+        {
+            EXPECT_EQ(post(alias, "127.0.0.2"), 429);
+        }
+        EXPECT_EQ(post(endpoint + "?probe=new", "127.0.0.2"), 429);
+        EXPECT_EQ(post(endpoint + "?probe=1", "127.0.0.3"), 401);
+    }
 }
 
 TEST_CASE("api: rate limiter header rotation cannot bypass quotas and direct peers are independent")

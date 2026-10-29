@@ -2,8 +2,8 @@
 
 #include <memory>
 #include <string>
-#include <unordered_set>
 
+#include "oatpp/web/server/HttpRouter.hpp"
 #include "oatpp/web/server/interceptor/RequestInterceptor.hpp"
 
 #include "app/auth/JwtService.hpp"
@@ -34,7 +34,7 @@ public:
 
 private:
     std::shared_ptr<services::AuthService> authService_;
-    std::unordered_set<std::string> publicPaths_;
+    std::shared_ptr<oatpp::web::server::HttpRouterTemplate<bool>> publicPaths_;
 };
 
 }  // namespace app::middlewares

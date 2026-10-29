@@ -28,13 +28,19 @@ RateLimitInterceptor::RateLimitInterceptor(const Options& options, Now now)
         throw std::invalid_argument("Rate limit counts, window and clock must be valid and non-zero");
     }
     // By default, protect authentication and token refresh from brute-force attempts
-    protectedEndpoints_ = {"POST /auth/login", "POST /auth/refresh"};
+    addProtectedEndpoint("POST /auth/login");
+    addProtectedEndpoint("POST /auth/refresh");
 }
 
 void RateLimitInterceptor::addProtectedEndpoint(const std::string& methodAndPath)
 {
+    const auto separator = methodAndPath.find(' ');
+    if (separator == std::string::npos || separator == 0 || separator + 1 == methodAndPath.size())
+    {
+        throw std::invalid_argument("Protected endpoints require a method and path");
+    }
     std::lock_guard<std::mutex> lock(mutex_);
-    protectedEndpoints_.insert(methodAndPath);
+    protectedEndpoints_.route(methodAndPath.substr(0, separator), methodAndPath.substr(separator + 1), methodAndPath);
 }
 
 std::optional<std::string> RateLimitInterceptor::extractClientIp(const std::shared_ptr<IncomingRequest>& request) const
@@ -134,23 +140,23 @@ void RateLimitInterceptor::reset()
 std::shared_ptr<RateLimitInterceptor::OutgoingResponse> RateLimitInterceptor::intercept(
     const std::shared_ptr<IncomingRequest>& request)
 {
-    const std::string method = request->getStartingLine().method.std_str();
-    const std::string path = request->getStartingLine().path.std_str();
-    const std::string probe = method + " " + path;
-
-    bool isProtected = false;
+    std::string endpoint;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        isProtected = (protectedEndpoints_.find(probe) != protectedEndpoints_.end());
+        const auto& line = request->getStartingLine();
+        auto route = protectedEndpoints_.getRoute(line.method, line.path);
+        if (!route)
+        {
+            return nullptr;
+        }
+        // Use the registered endpoint so every URL accepted by its route shares one quota.
+        endpoint = route.getEndpoint();
     }
 
-    if (isProtected)
+    const auto ip = extractClientIp(request);
+    if (!ip || !checkAllowed(endpoint + ":" + *ip))
     {
-        const auto ip = extractClientIp(request);
-        if (!ip || !checkAllowed(probe + ":" + *ip))
-        {
-            throw errors::ratelimit::Exceeded("Rate limit exceeded for " + probe);
-        }
+        throw errors::ratelimit::Exceeded("Rate limit exceeded for " + endpoint);
     }
 
     return nullptr;
