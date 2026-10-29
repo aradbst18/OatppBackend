@@ -37,8 +37,8 @@ void EchoListener::readMessage(const WebSocket& socket, v_uint8 opcode, p_char8 
     {
         oatpp::String text(reinterpret_cast<const char*>(data), static_cast<v_buff_size>(size));
         logging::logDebug("websocket", "Echoing text message");
-        const std::string reply = "Server echo: " + std::string(text->c_str());
-        socket.sendOneFrameText(reply.c_str());
+        const std::string reply = "Server echo: " + *text;
+        socket.sendOneFrameText(reply);
     }
     else if (opcode == oatpp::websocket::Frame::OPCODE_BINARY)
     {

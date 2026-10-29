@@ -206,37 +206,26 @@ TEST_CASE("websocket: echo roundtrip")
             throw std::runtime_error("expected 101 upgrade, got: " + resp.substr(0, 200));
         }
 
-        // Send one masked text frame "hello".
-        const std::string payload = "hello";
-        std::string frame;
-        frame.push_back(static_cast<char>(0x81));                   // FIN + text
-        frame.push_back(static_cast<char>(0x80 | payload.size()));  // masked, len 5
-        const unsigned char mask[4] = {0x11, 0x22, 0x33, 0x44};
-        frame.append(reinterpret_cast<const char*>(mask), 4);
-        for (std::size_t i = 0; i < payload.size(); ++i)
+        for (const auto& payload : {std::string("hello"), std::string("a\0b", 3), std::string("\0ab", 3),
+                                    std::string("ab\0", 3), std::string("\0", 1)})
         {
-            frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
-        }
-        sendAll(fd, frame);
-
-        // Read server frame (unmasked). The header and payload may arrive in
-        // separate TCP segments, so loop until the full frame is present.
-        std::string got;
-        char buf[4096];
-        for (int i = 0; i < 50 && got.size() < 2; ++i)
-        {
-            const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
-            if (n <= 0)
+            echoOk = false;
+            std::string frame;
+            frame.push_back(static_cast<char>(0x81));                   // FIN + text
+            frame.push_back(static_cast<char>(0x80 | payload.size()));  // masked, short payload
+            const unsigned char mask[4] = {0x11, 0x22, 0x33, 0x44};
+            frame.append(reinterpret_cast<const char*>(mask), 4);
+            for (std::size_t i = 0; i < payload.size(); ++i)
             {
-                break;
+                frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
             }
-            got.append(buf, static_cast<std::size_t>(n));
-        }
+            sendAll(fd, frame);
 
-        if (got.size() >= 2)
-        {
-            const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
-            for (int i = 0; i < 50 && got.size() < 2 + len; ++i)
+            // Read server frame (unmasked). The header and payload may arrive in
+            // separate TCP segments, so loop until the full frame is present.
+            std::string got;
+            char buf[4096];
+            for (int i = 0; i < 50 && got.size() < 2; ++i)
             {
                 const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
                 if (n <= 0)
@@ -245,29 +234,49 @@ TEST_CASE("websocket: echo roundtrip")
                 }
                 got.append(buf, static_cast<std::size_t>(n));
             }
-        }
 
-        if (got.size() >= 2)
-        {
-            const unsigned char op = static_cast<unsigned char>(got[0]) & 0x0F;
-            const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
-            if (op == 0x1 && got.size() >= 2 + len)
+            if (got.size() >= 2)
             {
-                const std::string text = got.substr(2, len);
-                echoOk = (text == "Server echo: hello");
-                if (!echoOk)
+                const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
+                for (int i = 0; i < 50 && got.size() < 2 + len; ++i)
                 {
-                    failure = "unexpected echo payload: " + text;
+                    const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+                    if (n <= 0)
+                    {
+                        break;
+                    }
+                    got.append(buf, static_cast<std::size_t>(n));
+                }
+            }
+
+            if (got.size() >= 2)
+            {
+                const unsigned char op = static_cast<unsigned char>(got[0]) & 0x0F;
+                const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
+                if (op == 0x1 && got.size() >= 2 + len)
+                {
+                    const std::string text = got.substr(2, len);
+                    const std::string expected = "Server echo: " + payload;
+                    echoOk = (len == expected.size() && text == expected);
+                    if (!echoOk)
+                    {
+                        failure = "unexpected echo payload: " + text;
+                    }
+                }
+                else
+                {
+                    failure = "unexpected opcode/len";
                 }
             }
             else
             {
-                failure = "unexpected opcode/len";
+                failure = "no frame received";
             }
-        }
-        else
-        {
-            failure = "no frame received";
+
+            if (!echoOk)
+            {
+                break;
+            }
         }
 
         ::close(fd);
@@ -287,5 +296,6 @@ TEST_CASE("websocket: echo roundtrip")
 
     serverThread.join();
 
+    EXPECT_EQ(failure, std::string{});
     EXPECT_TRUE(echoOk);
 }

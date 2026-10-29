@@ -39,6 +39,7 @@ for public WS endpoints — do not add `addSecurityRequirement` without
 ## Testing
 
 `test_websocket.cpp` performs a real handshake (`Sec-WebSocket-Key:
-dGhlIHNhbXBsZSBub25jZQ==`, expects 101), sends a masked `hello` frame, and
-asserts the payload is `Server echo: hello`, tolerating header/payload TCP
-segmentation.
+dGhlIHNhbXBsZSBub25jZQ==`, expects 101), sends masked text frames containing
+`hello` and embedded, leading, trailing, or only NUL bytes, and checks the full
+response length and bytes after the `Server echo: ` prefix, tolerating
+header/payload TCP segmentation.
