@@ -14,6 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         preset: [ debug, release, debug-asan-ubsan ]
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5433"
+      PGDATABASE: postgres
+      PGUSER: oatpp_tester
 
     steps:
       - name: Checkout code
@@ -31,6 +36,7 @@ jobs:
             zlib1g-dev \
             libsqlcipher-dev \
             libpq-dev \
+            postgresql \
             libjsoncpp-dev \
             libyaml-cpp-dev \
             libpugixml-dev
@@ -61,5 +67,27 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel $(nproc)
 
+      - name: Start test PostgreSQL
+        id: postgres
+        if: matrix.preset != 'release'
+        run: |
+          pg_bin="$(pg_config --bindir)"
+          pg_root="$RUNNER_TEMP/test-postgres"
+          mkdir -m 700 "$pg_root"
+          PGPASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$PGPASSWORD"
+          echo "PGPASSWORD=$PGPASSWORD" >> "$GITHUB_ENV"
+          (umask 077; printf '%s' "$PGPASSWORD" > "$pg_root/password")
+          "$pg_bin/initdb" -D "$pg_root/data" -U "$PGUSER" \
+            --auth=scram-sha-256 --pwfile="$pg_root/password"
+          rm "$pg_root/password"
+          "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$pg_root/server.log" \
+            -o "-h $PGHOST -p $PGPORT -k $pg_root" -w start
+
       - name: Run Tests
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel $(nproc)
+
+      - name: Stop test PostgreSQL
+        if: always() && steps.postgres.outcome == 'success'
+        run: |
+          "$(pg_config --bindir)/pg_ctl" -D "$RUNNER_TEMP/test-postgres/data" -m fast -w stop
