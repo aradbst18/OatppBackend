@@ -20,14 +20,16 @@ Full detail: [`docs/architecture.md`](docs/architecture.md). New endpoints:
 ## Prerequisites
 
 - CMake >= 3.20, GCC/Clang with C++17, OpenSSL, ZLIB
-- Oat++ 1.3.0 modules: `oatpp`, `oatpp-websocket`, `oatpp-sqlite` (if
+- Oat++ 1.3.0 modules: `oatpp`, `oatpp-sqlite` (if
   `APP_ENABLE_SQLCIPHER=ON`), `oatpp-postgresql` (if `APP_ENABLE_POSTGRESQL=ON`),
   `oatpp-swagger` (if `APP_ENABLE_SWAGGER=ON`), `oatpp-zlib` (if
   `APP_ENABLE_ZLIB=ON`)
+- `oatpp-websocket` 1.3.0 is built offline from the bundled archive with a
+  continuation-frame correction; no system installation is needed.
 - `jwt-cpp` 0.7.2, `jsoncpp` 1.9.6, `pugixml` 1.15, `toml11` 4.4.0
 - SQLCipher dev (the file database library; opens plaintext files too)
 
-All are discovered at configure time — `find_package`, plus
+Other dependencies are discovered at configure time — `find_package`, plus
 `pkg_check_modules` for SQLCipher (see [`docs/cmake.md`](docs/cmake.md)).
 
 ## Build instructions

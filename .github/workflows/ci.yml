@@ -49,7 +49,7 @@ jobs:
           cmake -B oatpp/build -S oatpp -DCMAKE_BUILD_TYPE=Release -DOATPP_BUILD_TESTS=OFF
           sudo cmake --build oatpp/build --target install --parallel $(nproc)
 
-          for mod in oatpp-swagger oatpp-websocket oatpp-zlib oatpp-sqlite oatpp-postgresql; do
+          for mod in oatpp-swagger oatpp-zlib oatpp-sqlite oatpp-postgresql; do
             git clone --depth 1 --branch 1.3.0-latest https://github.com/oatpp/${mod}.git
             cmake -B ${mod}/build -S ${mod} -DCMAKE_BUILD_TYPE=Release -DOATPP_BUILD_TESTS=OFF
             sudo cmake --build ${mod}/build --target install --parallel $(nproc)

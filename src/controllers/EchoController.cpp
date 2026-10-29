@@ -40,13 +40,13 @@ Swagger UI issues a plain `GET` without `Upgrade: websocket`, so you will always
 
 | Client sends | Server answers |
 |--------------|----------------|
-| Text frame `"hello"` | Text frame `"Server echo: hello"` (`"Server echo: "` + payload). |
-| Binary frame (bytes) | Same bytes echoed back as binary (protocol-correct binary echo). |
+| Text message `"hello"` | Text message `"Server echo: hello"` (`"Server echo: "` + payload). |
+| Binary message (bytes) | Same bytes echoed back as binary (protocol-correct binary echo). |
 | Ping | Pong with the same payload (automatic keep-alive). |
 | Pong / Close | Tracked / tears the connection down; live-socket counter decremented. |
 | Other opcodes | Connection closed (fail-closed). |
 
-Empty fragmented markers (`size == 0`) are ignored; explicitly empty messages do not produce a reply. There is no JSON envelope on the socket — just raw frames.
+Each complete message receives exactly one reply, including empty messages. Incoming messages may span multiple frames; text must be valid UTF-8 after assembly. The payload limit is 1 MiB per message (across all fragments); larger messages close the connection with code 1009, and invalid UTF-8 text closes it with code 1007. There is no JSON envelope on the socket.
 
 ## Frontend examples
 

@@ -9,11 +9,10 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <cstring>
+#include <cstdint>
 #include <string>
 #include <thread>
-
-#include <openssl/sha.h>
+#include <vector>
 
 #include "app/application/Application.hpp"
 #include "app/config/AppSettings.hpp"
@@ -92,35 +91,103 @@ void sendAll(int fd, const std::string& data)
     }
 }
 
-// Minimal base64 (for Sec-WebSocket-Accept logging only; the test uses a fixed key).
-std::string base64Encode(const unsigned char* data, std::size_t len)
+std::string clientFrame(unsigned char opcode, const std::string& payload, bool fin = true)
 {
-    static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-
-    for (std::size_t i = 0; i < len; i += 3)
+    std::string frame(1, static_cast<char>((fin ? 0x80 : 0) | opcode));
+    if (payload.size() < 126)
     {
-        const unsigned v = (static_cast<unsigned>(data[i]) << 16) |
-                           ((i + 1 < len ? static_cast<unsigned>(data[i + 1]) : 0) << 8) |
-                           (i + 2 < len ? static_cast<unsigned>(data[i + 2]) : 0);
-        out.push_back(k[(v >> 18) & 63]);
-        out.push_back(k[(v >> 12) & 63]);
-        out.push_back(i + 1 < len ? k[(v >> 6) & 63] : '=');
-        out.push_back(i + 2 < len ? k[v & 63] : '=');
+        frame.push_back(static_cast<char>(0x80 | payload.size()));
     }
+    else
+    {
+        const int lengthBytes = payload.size() <= 65535 ? 2 : 8;
+        frame.push_back(static_cast<char>(0x80 | (lengthBytes == 2 ? 126 : 127)));
+        for (int shift = (lengthBytes - 1) * 8; shift >= 0; shift -= 8)
+        {
+            frame.push_back(static_cast<char>((static_cast<std::uint64_t>(payload.size()) >> shift) & 0xFF));
+        }
+    }
+    const unsigned char mask[4] = {0x11, 0x22, 0x33, 0x44};
+    frame.append(reinterpret_cast<const char*>(mask), 4);
+    for (std::size_t i = 0; i < payload.size(); ++i)
+    {
+        frame.push_back(static_cast<char>(static_cast<unsigned char>(payload[i]) ^ mask[i % 4]));
+    }
+    return frame;
+}
 
-    return out;
+std::string readExact(int fd, std::size_t size)
+{
+    std::string data(size, '\0');
+    std::size_t received = 0;
+    while (received < size)
+    {
+        const ssize_t count = ::recv(fd, data.data() + received, size - received, 0);
+        if (count <= 0)
+        {
+            throw std::runtime_error("ws receive failed or timed out");
+        }
+        received += static_cast<std::size_t>(count);
+    }
+    return data;
+}
+
+void expectFrame(int fd, unsigned char opcode, const std::string& payload)
+{
+    const auto header = readExact(fd, 2);
+    EXPECT_EQ(static_cast<unsigned char>(header[0]), static_cast<unsigned char>(0x80 | opcode));
+    EXPECT_EQ(static_cast<unsigned char>(header[1]) & 0x80, 0);
+    std::uint64_t length = static_cast<unsigned char>(header[1]) & 0x7F;
+    if (length >= 126)
+    {
+        const auto extended = readExact(fd, length == 126 ? 2 : 8);
+        length = 0;
+        for (char byte : extended)
+        {
+            length = (length << 8) | static_cast<unsigned char>(byte);
+        }
+    }
+    EXPECT_EQ(length, static_cast<std::uint64_t>(payload.size()));
+    EXPECT_EQ(readExact(fd, payload.size()), payload);
+}
+
+void expectClose(int fd, unsigned int code)
+{
+    const auto header = readExact(fd, 2);
+    EXPECT_EQ(static_cast<unsigned char>(header[0]), 0x88);
+    const auto length = static_cast<unsigned char>(header[1]);
+    EXPECT_TRUE(length >= 2 && length <= 125);
+    const auto payload = readExact(fd, length);
+    const auto receivedCode = (static_cast<unsigned char>(payload[0]) << 8) | static_cast<unsigned char>(payload[1]);
+    EXPECT_EQ(static_cast<unsigned int>(receivedCode), code);
+    char extra;
+    EXPECT_EQ(::recv(fd, &extra, 1, 0), 0);
+}
+
+int connectWebSocket(int port)
+{
+    const int fd = connectTo("127.0.0.1", port);
+    if (fd < 0)
+    {
+        throw std::runtime_error("ws connect failed");
+    }
+    try
+    {
+        sendAll(fd,
+                "GET /ws/echo HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+                "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                "Sec-WebSocket-Version: 13\r\n\r\n");
+        EXPECT_TRUE(recvAll(fd).find(" 101 ") != std::string::npos);
+    }
+    catch (...)
+    {
+        ::close(fd);
+        throw;
+    }
+    return fd;
 }
 
 }  // namespace
-
-TEST_CASE("websocket: base64 helper sanity")
-{
-    const std::string in = "hello";
-    const std::string enc = base64Encode(reinterpret_cast<const unsigned char*>(in.data()), in.size());
-
-    EXPECT_EQ(enc, std::string("aGVsbG8="));
-}
 
 TEST_CASE("websocket: echo roundtrip")
 {
@@ -183,107 +250,114 @@ TEST_CASE("websocket: echo roundtrip")
 
     EXPECT_TRUE(ready);
 
-    bool echoOk = false;
     std::string failure;
-
+    int fd = -1;
     try
     {
-        int fd = connectTo("127.0.0.1", port);
-        if (fd < 0)
+        fd = connectWebSocket(port);
+        const auto expectPong = [&]()
         {
-            throw std::runtime_error("connect failed");
-        }
-
-        const std::string key = "dGhlIHNhbXBsZSBub25jZQ==";
-        const std::string hs = "GET /ws/echo HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n" +
-                               std::string("Connection: Upgrade\r\nSec-WebSocket-Key: ") + key +
-                               "\r\nSec-WebSocket-Version: 13\r\n\r\n";
-        sendAll(fd, hs);
-
-        const std::string resp = recvAll(fd);
-        if (resp.find("101") == std::string::npos)
+            // A pong is an ordering barrier: an extra or premature echo fails immediately.
+            sendAll(fd, clientFrame(0x9, "barrier"));
+            expectFrame(fd, 0xA, "barrier");
+        };
+        const auto expectEcho = [&](unsigned char opcode, const std::string& payload)
         {
-            throw std::runtime_error("expected 101 upgrade, got: " + resp.substr(0, 200));
-        }
-
-        for (const auto& payload : {std::string("hello"), std::string("a\0b", 3), std::string("\0ab", 3),
-                                    std::string("ab\0", 3), std::string("\0", 1)})
+            sendAll(fd, clientFrame(opcode, payload));
+            expectFrame(fd, opcode, opcode == 0x1 ? "Server echo: " + payload : payload);
+            expectPong();
+        };
+        const std::vector<std::string> payloads = {"hello",
+                                                   "",
+                                                   std::string("a\0b", 3),
+                                                   std::string("\0ab", 3),
+                                                   std::string("ab\0", 3),
+                                                   std::string("\0", 1),
+                                                   std::string(125, 'a'),
+                                                   std::string(126, 'a'),
+                                                   std::string(1023, 'a'),
+                                                   std::string(1024, 'a'),
+                                                   std::string(1025, 'a'),
+                                                   std::string(2048, 'a'),
+                                                   std::string(16384, 'a'),
+                                                   std::string(65536, 'a'),
+                                                   std::string(1023, 'a') + "\xE2\x82\xAC",
+                                                   "\xC2\x80\xDF\xBF\xE0\xA0\x80\xED\x9F\xBF\xEE\x80\x80\xEF\xBF\xBF"
+                                                   "\xF0\x90\x80\x80\xF4\x8F\xBF\xBF"};
+        for (const auto opcode : {static_cast<unsigned char>(0x1), static_cast<unsigned char>(0x2)})
         {
-            echoOk = false;
-            std::string frame;
-            frame.push_back(static_cast<char>(0x81));                   // FIN + text
-            frame.push_back(static_cast<char>(0x80 | payload.size()));  // masked, short payload
-            const unsigned char mask[4] = {0x11, 0x22, 0x33, 0x44};
-            frame.append(reinterpret_cast<const char*>(mask), 4);
-            for (std::size_t i = 0; i < payload.size(); ++i)
+            for (const auto& payload : payloads)
             {
-                frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
+                expectEcho(opcode, payload);
             }
-            sendAll(fd, frame);
-
-            // Read server frame (unmasked). The header and payload may arrive in
-            // separate TCP segments, so loop until the full frame is present.
-            std::string got;
-            char buf[4096];
-            for (int i = 0; i < 50 && got.size() < 2; ++i)
-            {
-                const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
-                if (n <= 0)
-                {
-                    break;
-                }
-                got.append(buf, static_cast<std::size_t>(n));
-            }
-
-            if (got.size() >= 2)
-            {
-                const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
-                for (int i = 0; i < 50 && got.size() < 2 + len; ++i)
-                {
-                    const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
-                    if (n <= 0)
-                    {
-                        break;
-                    }
-                    got.append(buf, static_cast<std::size_t>(n));
-                }
-            }
-
-            if (got.size() >= 2)
-            {
-                const unsigned char op = static_cast<unsigned char>(got[0]) & 0x0F;
-                const std::size_t len = static_cast<unsigned char>(got[1]) & 0x7F;
-                if (op == 0x1 && got.size() >= 2 + len)
-                {
-                    const std::string text = got.substr(2, len);
-                    const std::string expected = "Server echo: " + payload;
-                    echoOk = (len == expected.size() && text == expected);
-                    if (!echoOk)
-                    {
-                        failure = "unexpected echo payload: " + text;
-                    }
-                }
-                else
-                {
-                    failure = "unexpected opcode/len";
-                }
-            }
-            else
-            {
-                failure = "no frame received";
-            }
-
-            if (!echoOk)
-            {
-                break;
-            }
+            sendAll(fd, clientFrame(opcode, "", false));
+            expectPong();
+            sendAll(fd, clientFrame(0x0, "a", false));
+            expectPong();
+            sendAll(fd, clientFrame(0x0, std::string("\0b", 2), false));
+            expectPong();
+            sendAll(fd, clientFrame(0x0, ""));
+            expectFrame(fd, opcode, opcode == 0x1 ? std::string("Server echo: a\0b", 16) : std::string("a\0b", 3));
+            expectPong();
+            expectEcho(opcode, "after fragmentation");
+            sendAll(fd, clientFrame(opcode, "", false) + clientFrame(0x0, ""));
+            expectFrame(fd, opcode, opcode == 0x1 ? "Server echo: " : "");
+            expectPong();
         }
+        sendAll(fd, clientFrame(0x1, "\xE2", false));
+        expectPong();
+        sendAll(fd, clientFrame(0x0, "\x82", false));
+        sendAll(fd, clientFrame(0x0, "\xAC"));
+        expectFrame(fd, 0x1, "Server echo: \xE2\x82\xAC");
+        expectEcho(0x1, "after split UTF-8");
 
+        constexpr std::size_t limit = 1024 * 1024;
+        for (const auto opcode : {static_cast<unsigned char>(0x1), static_cast<unsigned char>(0x2)})
+        {
+            expectEcho(opcode, std::string(limit, 'a'));
+        }
+        for (const auto opcode : {static_cast<unsigned char>(0x1), static_cast<unsigned char>(0x2)})
+        {
+            sendAll(fd, clientFrame(opcode, std::string(limit + 1, 'a')));
+            expectClose(fd, 1009);
+            ::close(fd);
+            fd = -1;
+            fd = connectWebSocket(port);
+
+            sendAll(fd, clientFrame(opcode, std::string(limit, 'a'), false));
+            expectPong();
+            sendAll(fd, clientFrame(0x0, "a"));
+            expectClose(fd, 1009);
+            ::close(fd);
+            fd = -1;
+            fd = connectWebSocket(port);
+        }
+        // The reader must abort an oversized frame without waiting for its remaining bytes.
+        const auto oversized = clientFrame(0x1, std::string(limit + 4096, 'a'));
+        sendAll(fd, oversized.substr(0, 14 + limit + 1));
+        expectClose(fd, 1009);
         ::close(fd);
+        fd = -1;
+
+        for (const auto& malformed : {"\x80", "\xC0\x80", "\xE0\x80\x80", "\xED\xA0\x80", "\xF0\x80\x80\x80",
+                                      "\xF4\x90\x80\x80", "\xF5\x80\x80\x80", "\xE2\x82", "\xE2\x28\xAC"})
+        {
+            fd = connectWebSocket(port);
+            sendAll(fd, clientFrame(0x1, malformed));
+            expectClose(fd, 1007);
+            ::close(fd);
+            fd = -1;
+        }
+        fd = connectWebSocket(port);
+        expectEcho(0x2, "\xFF\x80");
     }
     catch (const std::exception& ex)
     {
         failure = ex.what();
+    }
+    if (fd >= 0)
+    {
+        ::close(fd);
     }
 
     app.stop();
@@ -297,5 +371,4 @@ TEST_CASE("websocket: echo roundtrip")
     serverThread.join();
 
     EXPECT_EQ(failure, std::string{});
-    EXPECT_TRUE(echoOk);
 }

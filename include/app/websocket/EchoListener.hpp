@@ -11,9 +11,9 @@ namespace app::websocket
 
 /**
  * Per-connection echo listener: replies to every text message with
- * "Server echo: <message>" and answers pings with pongs. Binary frames are
- * echoed as text only when they form valid UTF-8; otherwise the connection
- * is closed (fail-closed on malformed input).
+ * "Server echo: <message>" and answers pings with pongs. Binary messages are
+ * echoed as binary. Messages are assembled up to 1 MiB; oversized messages
+ * and malformed UTF-8 text close the connection without a partial echo.
  */
 class EchoListener : public oatpp::websocket::WebSocket::Listener
 {
@@ -29,6 +29,7 @@ public:
     void readMessage(const WebSocket& socket, v_uint8 opcode, p_char8 data, oatpp::v_io_size size) override;
 
 private:
+    static constexpr oatpp::v_io_size maxMessageSize_ = 1024 * 1024;
     oatpp::data::stream::BufferOutputStream buffer_;
 };
 

@@ -22,7 +22,7 @@ if(APP_ENABLE_ZLIB)
 endif()
 
 find_package(oatpp 1.3.0 EXACT REQUIRED)
-find_package(oatpp-websocket 1.3.0 EXACT REQUIRED)
+include(oatpp_websocket)
 
 if(APP_ENABLE_ZLIB)
     find_package(oatpp-zlib 1.3.0 EXACT REQUIRED)
