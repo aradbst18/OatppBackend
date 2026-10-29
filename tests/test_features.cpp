@@ -1,5 +1,6 @@
 #include "support/TestRunner.hpp"
 
+#include <random>
 #include <string>
 
 #include "app/config/ConfigStore.hpp"
@@ -84,6 +85,52 @@ TEST_CASE("features: gzip roundtrip")
     EXPECT_TRUE(compressed.size() < plain.size());
     EXPECT_EQ(infrastructure::gzipDecompress(compressed), plain);
     EXPECT_THROW_AS(infrastructure::gzipDecompress("definitely-not-gzip"), std::runtime_error);
+}
+
+TEST_CASE("features: gzip empty payload")
+{
+    const std::string emptyGzip("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00", 20);
+
+    EXPECT_EQ(infrastructure::gzipDecompress(emptyGzip), "");
+    const auto compressed = infrastructure::gzipCompress("");
+    EXPECT_TRUE(!compressed.empty());
+    EXPECT_EQ(infrastructure::gzipDecompress(compressed), "");
+}
+
+TEST_CASE("features: gzip preserves bytes across buffer boundaries")
+{
+    std::mt19937 random(0);
+    for (const std::size_t size : {1023U, 1024U, 1025U, 4096U})
+    {
+        std::string plain(size, '\0');
+        for (char& byte : plain)
+        {
+            byte = static_cast<char>(random() & 0xffU);
+        }
+        plain.front() = '\0';
+        plain.back() = '\0';
+
+        EXPECT_EQ(infrastructure::gzipDecompress(infrastructure::gzipCompress(plain)), plain);
+    }
+}
+
+TEST_CASE("features: gzip rejects truncated and corrupt streams")
+{
+    EXPECT_THROW_AS(infrastructure::gzipDecompress(""), std::runtime_error);
+    for (const auto& plain : {std::string{}, std::string(4096, 'a')})
+    {
+        const auto compressed = infrastructure::gzipCompress(plain);
+        for (std::size_t size = 1; size < compressed.size(); ++size)
+        {
+            EXPECT_THROW_AS(infrastructure::gzipDecompress(compressed.substr(0, size)), std::runtime_error);
+        }
+        for (const std::size_t trailerOffset : {8U, 4U})
+        {
+            auto corrupt = compressed;
+            corrupt[corrupt.size() - trailerOffset] ^= 1;
+            EXPECT_THROW_AS(infrastructure::gzipDecompress(corrupt), std::runtime_error);
+        }
+    }
 }
 #else
 TEST_CASE("features: zlib disabled has no gzip API")

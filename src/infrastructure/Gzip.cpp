@@ -34,18 +34,41 @@ std::string gzipDecompress(const std::string& compressed)
 
     oatpp::String input(compressed.c_str(), static_cast<v_buff_size>(compressed.size()));
     oatpp::data::stream::BufferInputStream inStream(input);
-    oatpp::data::stream::BufferOutputStream outStream;
     oatpp::zlib::DeflateDecoder decoder(1024, true /* gzip */);
     oatpp::data::buffer::IOBuffer buffer;
-    oatpp::data::stream::transfer(&inStream, &outStream, 0, buffer.getData(), buffer.getSize(), &decoder);
+    oatpp::data::buffer::InlineReadData dataIn(buffer.getData(), 0);
+    oatpp::data::buffer::InlineReadData dataOut;
+    std::string plain;
+    using Error = oatpp::data::buffer::Processor::Error;
 
-    const auto out = outStream.toString();
-    if (!out || out->size() == 0)
+    // transfer() hides decoder errors; require FINISHED before accepting any output.
+    while (true)
     {
-        throw std::runtime_error("gzip decompress failed: corrupt input");
+        switch (decoder.iterate(dataIn, dataOut))
+        {
+            case Error::PROVIDE_DATA_IN:
+            {
+                const auto size = inStream.readSimple(buffer.getData(), buffer.getSize());
+                if (size < 0)
+                {
+                    throw std::runtime_error("gzip decompress failed: corrupt input");
+                }
+                dataIn.set(size > 0 ? buffer.getData() : nullptr, size);
+                break;
+            }
+            case Error::FLUSH_DATA_OUT:
+                plain.append(static_cast<const char*>(dataOut.currBufferPtr),
+                             static_cast<std::size_t>(dataOut.bytesLeft));
+                dataOut.setEof();
+                break;
+            case Error::FINISHED:
+                return plain;
+            case Error::OK:
+                break;
+            default:
+                throw std::runtime_error("gzip decompress failed: corrupt input");
+        }
     }
-
-    return std::string(out->c_str(), static_cast<std::size_t>(out->size()));
 }
 
 }  // namespace app::infrastructure

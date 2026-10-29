@@ -14,7 +14,8 @@ namespace app::infrastructure
 /// covered by tests. Returns the compressed bytes.
 std::string gzipCompress(const std::string& plain);
 
-/// Decompress gzip bytes produced by gzipCompress. Throws on corrupt input.
+/// Decompress gzip bytes produced by gzipCompress; an empty payload is valid.
+/// Throws std::runtime_error on corrupt or empty compressed input.
 std::string gzipDecompress(const std::string& compressed);
 
 }  // namespace app::infrastructure

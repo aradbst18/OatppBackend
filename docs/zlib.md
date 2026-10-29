@@ -97,7 +97,8 @@ namespace app::infrastructure
 /// Compress a payload with gzip (oatpp-zlib). Returns the compressed bytes.
 std::string gzipCompress(const std::string& plain);
 
-/// Decompress gzip bytes produced by gzipCompress. Throws std::runtime_error on corrupt/empty input.
+/// Decompress gzip bytes produced by gzipCompress; an empty payload is valid.
+/// Throws std::runtime_error on corrupt or empty compressed input.
 std::string gzipDecompress(const std::string& compressed);
 
 }  // namespace app::infrastructure
@@ -135,7 +136,8 @@ void demonstrateCompression()
 ### Error Handling
 
 - **Empty input**: Passing an empty string to `gzipDecompress("")` throws `std::runtime_error("gzip decompress failed: empty input")`.
-- **Corrupt input**: Passing corrupted or invalid bytes throws `std::runtime_error("gzip decompress failed: corrupt input")`.
+- **Empty payload**: A complete, valid gzip stream containing no payload returns an empty string, including `gzipDecompress(gzipCompress(""))`.
+- **Corrupt input**: Invalid bytes, truncated streams, and damaged gzip checksums or length trailers throw `std::runtime_error("gzip decompress failed: corrupt input")`, even if some output has already been decoded. Success requires the decoder to reach `FINISHED`; output length does not determine stream validity.
 
 ---
 
@@ -154,6 +156,9 @@ void demonstrateCompression()
 
 1. **Unit & Roundtrip Tests (`tests/test_features.cpp`)**:
    - `features: gzip roundtrip`: Verifies `gzipCompress` and `gzipDecompress` roundtrip integrity, checks compressed size reduction on repetitive strings, and asserts exception throwing on corrupt inputs (`"definitely-not-gzip"`).
+   - `features: gzip empty payload`: Accepts a fixed empty gzip fixture and the empty-payload round trip.
+   - `features: gzip preserves bytes across buffer boundaries`: Verifies binary payloads at 1,023, 1,024, 1,025, and 4,096 bytes, including leading and trailing NULs.
+   - `features: gzip rejects truncated and corrupt streams`: Rejects empty input, every truncated prefix of empty and 4,096-byte payload streams, and damaged CRC/length trailers.
    - `features: zlib disabled has no gzip API`: Validates compile-time isolation when compiled with `-DAPP_ENABLE_ZLIB=OFF`.
 
 2. **Running the Test Suite**:
