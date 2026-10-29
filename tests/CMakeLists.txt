@@ -51,6 +51,8 @@ foreach(SUITE ${TEST_SUITES})
 endforeach()
 
 add_test(NAME app_tests_all COMMAND app_tests)
+# The combined suite shares listening ports and temporary paths with individual suites.
+set_tests_properties(app_tests_all PROPERTIES RUN_SERIAL TRUE)
 
 # A separate process guarantees the environment has not been initialized by another test.
 add_test(NAME test_environment_first_use COMMAND app_tests "environment:")
