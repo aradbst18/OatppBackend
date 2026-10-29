@@ -331,7 +331,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_updateUser(
 
 - **`PUT` is for full updates:** All fields (`username`, `password`, `role`) MUST be provided in the request body.
 - **Account Renaming:** The URL path parameter `{username}` specifies the user's **current username** in the database. The request body `username` specifies the **new username** (which may be the same or different). If the username is changed, the backend updates the primary key identity.
-- **Admin Protection:** The default admin account (`admin`) cannot have its username changed. Attempting to rename `admin` returns `403 Forbidden`.
+- **Admin Protection:** The configured bootstrap administrator (default username `admin`) cannot be renamed or demoted. Either attempt returns `403 Forbidden` without changing account fields or sessions. Password changes retaining role `admin` are allowed.
 
 ## Request Rules
 
@@ -365,7 +365,7 @@ const updated = await res.json();
 | 200 | — | Success. Returns updated `UserResponseDto`. | Update UI state with new username/role. |
 | 400 | `request::Missing` | Path or body fields (`username`, `password`, `role`) omitted. | Ensure all 3 fields are supplied. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
-| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming the default admin is also forbidden. | Use an account with the required role. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming or demoting the configured bootstrap administrator is also forbidden. | Use an account with the required role and preserve bootstrap administrator identity and role. |
 | 404 | `database::RecordNotFound` | Current username does not exist in the database. | Verify target account. |
 | 409 | `database::Conflict` | New username is already in use by another account. | Choose a different username. |
 | 422 | `validation::InvalidValue` | Invalid format for username, password, or role. | Review validation constraints. |)DOC";
@@ -397,7 +397,7 @@ const updated = await res.json();
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
     info->addResponse<oatpp::String>(
         Status::CODE_403, "text/plain",
-        "Token role is not admin, is missing, or is unrecognized. Default admin username cannot be changed.");
+        "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator cannot be renamed or demoted.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");
@@ -417,6 +417,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_patchUser(
 - Any field that is provided is validated and updated.
 - At least one field must be provided in the request body.
 - If `username` is provided and differs from `{username}` in the path, the account is renamed (default admin is protected from rename).
+- The configured bootstrap administrator (default username `admin`) cannot be demoted. A supplied role must remain `admin`; otherwise the entire update returns `403 Forbidden` without changing account fields or sessions. Password-only updates are allowed.
 
 ## Example Scenarios
 
@@ -454,7 +455,7 @@ const user = await res.json();
 | 200 | — | Success. Returns updated `UserResponseDto`. | Update cached user state. |
 | 400 | `request::Missing` | Path missing or empty PATCH body (no fields provided). | Provide at least one field to change. |
 | 401 | `authentication::InvalidToken` | Missing, invalid, or expired bearer token. | Redirect to login. |
-| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming the default admin is also forbidden. | Use an account with the required role. |
+| 403 | `authorization::ResourceAccessDenied` | Token role is not admin, is missing, or is unrecognized. Renaming or demoting the configured bootstrap administrator is also forbidden. | Use an account with the required role and preserve bootstrap administrator identity and role. |
 | 404 | `database::RecordNotFound` | Current user does not exist. | Account not found. |
 | 409 | `database::Conflict` | New username is already taken. | Choose another username. |
 | 422 | `validation::InvalidValue` | Any provided field fails validation rules. | Fix field validation. |)DOC";
@@ -484,7 +485,7 @@ const user = await res.json();
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
     info->addResponse<oatpp::String>(
         Status::CODE_403, "text/plain",
-        "Token role is not admin, is missing, or is unrecognized. Default admin username cannot be changed.");
+        "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator cannot be renamed or demoted.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");

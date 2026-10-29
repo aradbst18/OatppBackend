@@ -176,6 +176,47 @@ TEST_CASE("auth: bootstrap refuses to promote an existing non-administrator")
     EXPECT_EQ(std::string(*fixture.users->getUser("admin")->role), std::string("viewer"));
 }
 
+TEST_CASE("auth: bootstrap administrator demotion preserves account fields and sessions")
+{
+    for (const std::string username : {"admin", "customAdmin"})
+    {
+        AuthFixture fixture;
+        const auto protectedUsername = fixture.service->ensureSeeded(username, kTestAdminPassword);
+        services::UserService users(fixture.users, protectedUsername);
+        users.createUser({"otherAdmin", "OtherAdmin8391", "admin"});
+        const auto original = fixture.users->getUser(username);
+        const auto login = fixture.service->login(username, kTestAdminPassword);
+
+        for (const std::string role : {"viewer", "operator"})
+        {
+            const services::UpdateUserInput update(username, "RejectedPass456", role);
+            EXPECT_THROW_AS(users.updateUser(username, update), errors::authorization::ResourceAccessDenied);
+            services::PatchUserInput patch;
+            patch.password = "RejectedPass456";
+            patch.role = role;
+            EXPECT_THROW_AS(users.patchUser(username, patch), errors::authorization::ResourceAccessDenied);
+
+            const auto unchanged = fixture.users->getUser(username);
+            EXPECT_EQ(*unchanged->id, *original->id);
+            EXPECT_EQ(*unchanged->passwordHash, *original->passwordHash);
+            EXPECT_EQ(*unchanged->role, *original->role);
+            EXPECT_EQ(unchanged->sessionVersion.getValue(-1), original->sessionVersion.getValue(-1));
+        }
+
+        EXPECT_EQ(fixture.service->authenticate(login.accessToken).role, std::string("admin"));
+        EXPECT_FALSE(fixture.service->refresh(login.refreshToken).accessToken.empty());
+        EXPECT_EQ(fixture.service->login(username, kTestAdminPassword).role, std::string("admin"));
+        EXPECT_EQ(users.updateUser(username, {username, "ChangedAdmin8391", "admin"}).role, std::string("admin"));
+        services::PatchUserInput patch;
+        patch.role = "admin";
+        EXPECT_EQ(users.patchUser(username, patch).role, std::string("admin"));
+        patch.role.reset();
+        patch.password = "PatchedAdmin8391";
+        EXPECT_EQ(users.patchUser(username, patch).role, std::string("admin"));
+        EXPECT_EQ(fixture.service->login(username, "PatchedAdmin8391").role, std::string("admin"));
+    }
+}
+
 TEST_CASE("auth: jwt create and verify")
 {
     auth::JwtService jwt(kTestSecret, "test-issuer", std::chrono::seconds(3600));

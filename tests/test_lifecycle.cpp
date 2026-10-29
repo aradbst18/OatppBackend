@@ -538,9 +538,22 @@ TEST_CASE("lifecycle: application startup rejects the published bootstrap passwo
 
 TEST_CASE("lifecycle: custom bootstrap administrator is protected by user management")
 {
+    struct DatabaseFile
+    {
+        std::string path = "/tmp/oatpp-bootstrap-" + auth::sha256Hex(auth::generateRandomSecret(16)) + ".db";
+        ~DatabaseFile()
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } file;
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "customAdmin");
     const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
-    application::Application app(applicationSettings());
+    auto settings = applicationSettings();
+#ifdef APP_DATABASE_SQLCIPHER
+    settings.databasePath = file.path;
+#endif
+    application::Application app(settings);
     app.initialize();
     EXPECT_EQ(app.authService()->login("customAdmin", "TestAdmin8391").role, std::string("admin"));
 
@@ -552,11 +565,23 @@ TEST_CASE("lifecycle: custom bootstrap administrator is protected by user manage
     patch.username = "renamedAdmin";
     EXPECT_THROW_AS(users->patchUser("customAdmin", patch), errors::authorization::ResourceAccessDenied);
 
+    const services::UpdateUserInput demote("customAdmin", "RejectedPassword1", "operator");
+    EXPECT_THROW_AS(users->updateUser("customAdmin", demote), errors::authorization::ResourceAccessDenied);
+    patch.username.reset();
+    patch.role = "viewer";
+    EXPECT_THROW_AS(users->patchUser("customAdmin", patch), errors::authorization::ResourceAccessDenied);
+
     users->createUser({"admin", "OtherAdmin8391", "viewer"});
     EXPECT_EQ(users->deleteAllUsers().deletedCount, 1);
     EXPECT_EQ(users->listUsers().size(), 1U);
     EXPECT_EQ(users->getUser("customAdmin").role, std::string("admin"));
     app.stop();
+
+    const tests::ScopedEnvironment noPassword("APP_SEED_ADMIN_PASSWORD", nullptr);
+    application::Application restarted(settings);
+    restarted.initialize();
+    EXPECT_EQ(restarted.authService()->login("customAdmin", "TestAdmin8391").role, std::string("admin"));
+    restarted.stop();
 }
 
 TEST_CASE("lifecycle: terminate handler installs without crashing")

@@ -1345,6 +1345,20 @@ TEST_CASE("api: users update - full update and patch")
     const std::string token = getAdminToken(srv->port);
     EXPECT_FALSE(token.empty());
 
+    for (const std::string method : {"PUT", "PATCH"})
+    {
+        for (const std::string role : {"viewer", "operator"})
+        {
+            const std::string payload =
+                "{\"username\":\"admin\",\"password\":\"RejectedPassword1\",\"role\":\"" + role + "\"}";
+            const std::string request =
+                method + " /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
+                "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(payload.size()) +
+                "\r\nConnection: close\r\n\r\n" + payload;
+            EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, request)), 403);
+        }
+    }
+
     // Create user charlie
     const std::string createPayload = R"({"username":"charlie","password":"CharliePassword1","role":"viewer"})";
     const std::string createReq =

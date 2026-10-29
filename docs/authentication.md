@@ -75,7 +75,10 @@ not required again: bootstrap verifies that the existing account is an
 administrator and preserves its stored password, including later password
 changes. A colliding non-administrator account causes a configuration error;
 bootstrap never promotes it or resets its credentials. The selected account
-is protected against deletion and renaming, including bulk deletion.
+is protected against deletion and renaming, including bulk deletion. PUT and
+PATCH also reject demotion of this account with HTTP 403, leaving all account
+fields and sessions unchanged. Password changes that retain its `admin` role
+remain allowed.
 
 For an installation created with the former `Admin1234` password, startup now
 fails while the selected account still uses it. Changing

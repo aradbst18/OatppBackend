@@ -169,6 +169,11 @@ UserInfo UserService::updateUser(const std::string& currentUsername, const Updat
         throw errors::authorization::ResourceAccessDenied("Default admin username cannot be changed");
     }
 
+    if (currentUsername == defaultAdminUsername_ && role != domain::UserRole::Admin)
+    {
+        throw errors::authorization::ResourceAccessDenied("Bootstrap administrator cannot be demoted");
+    }
+
     if (input.username != currentUsername && users_->isUserExists(input.username))
     {
         throw errors::database::Conflict("Username '" + input.username + "' already exists");
@@ -239,6 +244,11 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
         if (!domain::tryParseUserRole(*input.role, role))
         {
             throw errors::validation::InvalidValue("Invalid user role: '" + *input.role + "'");
+        }
+
+        if (currentUsername == defaultAdminUsername_ && role != domain::UserRole::Admin)
+        {
+            throw errors::authorization::ResourceAccessDenied("Bootstrap administrator cannot be demoted");
         }
     }
 

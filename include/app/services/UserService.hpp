@@ -70,7 +70,7 @@ struct DeleteUsersResult
  *
  * Owns user retrieval, creation, updating (full & partial), and deletion.
  * Enforces username/password/role validation, password hashing, and ensures
- * the default admin account cannot be deleted.
+ * the configured bootstrap administrator cannot be deleted, renamed, or demoted.
  */
 class UserService
 {
@@ -99,11 +99,13 @@ public:
     /// Fully update an existing user (both password and role are updated).
     /// Throws errors::database::RecordNotFound if user does not exist.
     /// Throws errors::validation::InvalidValue if fields are invalid.
+    /// Throws errors::authorization::ResourceAccessDenied if renaming or demoting the bootstrap administrator.
     UserInfo updateUser(const std::string& username, const UpdateUserInput& input);
 
     /// Partially update an existing user (updates only provided fields: password, role, or both).
     /// Throws errors::database::RecordNotFound if user does not exist.
     /// Throws errors::validation::InvalidValue if fields are invalid or no fields are provided.
+    /// Throws errors::authorization::ResourceAccessDenied if renaming or demoting the bootstrap administrator.
     UserInfo patchUser(const std::string& username, const PatchUserInput& input);
 
     /// Delete a single user.
