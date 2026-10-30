@@ -127,6 +127,10 @@ default password. Once the account exists, the bootstrap password may be
 removed from the environment. See [administrator provisioning](docs/authentication.md#administrator-provisioning)
 for validation and migration from the old sample password.
 
+VS Code server debug configurations prompt for this password. Enter it on the
+first start; leave the prompt blank on later starts. The prompt overrides any
+`APP_SEED_ADMIN_PASSWORD` inherited by VS Code.
+
 ## API examples
 
 Login (public) and authenticated who-am-i, unauthorized shape, Int8 overflow
