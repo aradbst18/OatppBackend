@@ -14,7 +14,7 @@ AuthInterceptor  dto->validate() + range-checked ObjectMapper
 
 Full detail: [`docs/architecture.md`](docs/architecture.md). New endpoints:
 [`docs/guides/adding-api.md`](docs/guides/adding-api.md). Rules for AI agents:
-[`AGENTS.md`](AGENTS.md) and [`.agents/`](.agents/).
+[`AGENTS.md`](AGENTS.md).
 
 
 ## Prerequisites
