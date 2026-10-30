@@ -1,5 +1,13 @@
 {
     "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "seedAdminPassword",
+            "type": "promptString",
+            "description": "Initial admin password: 6-48 characters, including a letter and a digit; leave blank if already created. Admin1234 is not allowed.",
+            "password": true
+        }
+    ],
     "configurations": [
         {
             "name": "Debug server (debug)",
@@ -12,6 +20,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (debug)"
         },
         {
@@ -34,6 +43,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (debug-asan-ubsan)"
         },
         {
@@ -56,6 +66,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (debug-tsan)"
         },
         {
@@ -78,6 +89,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (debug-msan)"
         },
         {
@@ -100,6 +112,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (relwithdebinfo)"
         },
         {
@@ -122,6 +135,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (relwithdebinfo-asan-ubsan)"
         },
         {
@@ -144,6 +158,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (relwithdebinfo-tsan)"
         },
         {
@@ -166,6 +181,7 @@
             ],
             "cwd": "${workspaceFolder}",
             "MIMode": "gdb",
+            "environment": [{ "name": "APP_SEED_ADMIN_PASSWORD", "value": "${input:seedAdminPassword}" }],
             "preLaunchTask": "Preset: Build (relwithdebinfo-msan)"
         },
         {
