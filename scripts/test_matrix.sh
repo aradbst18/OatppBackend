@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 
-# Full backend x format x feature test matrix WITHOUT checked-in presets.
+# Backend x encryption x format x feature x hash x version-format matrix.
 #
-# CMakePresets.json intentionally stays at base/debug/release. This script
-# drives plain `cmake -S/-B` with explicit -D flags (command-line -D wins over
-# any preset/base defaults) for every combination, then builds and tests it.
+# Uses the selected checked-in preset, with explicit -D overrides for each case.
+# Subset environment variables keep CI coverage bounded.
 # Build trees land in build/matrix/<combo>/, never clobbering build/debug.
 #
-# Usage: scripts/test_matrix.sh [debug|release]   (default: debug)
+# Usage: scripts/test_matrix.sh [preset]   (default: debug)
 #
 # Env (space-separated subsets; defaults = everything):
 #   MATRIX_BACKENDS="SQLCIPHER"   # file user-database encryption variants under test (ENCRYPTION ON/OFF x formats/features)
 #   MATRIX_FORMATS="JSON TOML XML YAML"
 #   MATRIX_FEATURES="full swagger zlib minimal"
 #   MATRIX_PARSERS=1   # also run parser-exclusion builds + fail-fast negatives
+#   MATRIX_HASHES="SHA256 SHA384 SHA512"
+#   MATRIX_CONFIGURE_ONLY=0  # 1 validates configurations without building
 #   MATRIX_VERSION_FORMATS="JSON"  # version-file formats to exercise
 #                                  # (same four options / parser rules as
 #                                  # APP_CONFIG_FORMAT; space-separated)
@@ -32,16 +33,8 @@ cd "$(dirname "$0")/.."
 BUILD_TYPE="${1:-debug}"
 
 case "$BUILD_TYPE" in
-    debug)
-        CMAKE_BT="Debug"
-        ;;
-    release)
-        CMAKE_BT="Release"
-        ;;
-    *)
-        echo "usage: $0 [debug|release]" >&2
-        exit 2
-        ;;
+    debug|debug-asan-ubsan|debug-tsan|debug-msan|relwithdebinfo|relwithdebinfo-asan-ubsan|relwithdebinfo-tsan|relwithdebinfo-msan|release|minsizerel) ;;
+    *) echo "Unknown preset: $BUILD_TYPE" >&2; exit 2 ;;
 esac
 
 DB_BACKENDS=${MATRIX_BACKENDS:-"SQLCIPHER"}
@@ -50,7 +43,10 @@ DFG_FORMATS=${MATRIX_FORMATS:-"JSON TOML XML YAML"}
 FEATURES=${MATRIX_FEATURES:-"full swagger zlib minimal"}
 PARSERS=${MATRIX_PARSERS:-1}
 VFMTS=${MATRIX_VERSION_FORMATS:-"JSON"}
+HASHES=${MATRIX_HASHES:-"SHA256 SHA384 SHA512"}
+CONFIGURE_ONLY=${MATRIX_CONFIGURE_ONLY:-0}
 TESTS=${MATRIX_TESTS:-1}
+case "$BUILD_TYPE" in release|minsizerel) TESTS=0 ;; esac
 JOBS=${JOBS:-$(nproc)}
 GEN_ARGS=()
 [[ -n "${GENERATOR:-}" ]] && GEN_ARGS=(-G "$GENERATOR")
@@ -76,16 +72,24 @@ run_case() { # <name> <cmake-args...>
     mkdir -p "build/matrix"
     echo "=== [matrix] ${name} ==="
 
-    if ! cmake -S . -B "$dir" "${GEN_ARGS[@]}" \
-        -DCMAKE_BUILD_TYPE="$CMAKE_BT" "${args[@]}" >>"$dir.configure.log" 2>&1; then
+    if ! cmake --preset "$BUILD_TYPE" -S . -B "$dir" "${GEN_ARGS[@]}" \
+        "${args[@]}" >>"$dir.configure.log" 2>&1; then
         echo "  CONFIGURE FAILED (see $dir.configure.log)"
+        tail -n 60 "$dir.configure.log"
         FAIL=$((FAIL + 1))
         FAILED_CASES+=("${name} (configure)")
         return 0
     fi
 
+    if [[ "$CONFIGURE_ONLY" == "1" ]]; then
+        echo "  PASS (configure only)"
+        PASS=$((PASS + 1))
+        return 0
+    fi
+
     if ! cmake --build "$dir" -j"$JOBS" >>"$dir.build.log" 2>&1; then
         echo "  BUILD FAILED (see $dir.build.log)"
+        tail -n 60 "$dir.build.log"
         FAIL=$((FAIL + 1))
         FAILED_CASES+=("${name} (build)")
         return 0
@@ -97,8 +101,9 @@ run_case() { # <name> <cmake-args...>
         return 0
     fi
 
-    if ! ctest --test-dir "$dir" --output-on-failure >>"$dir.test.log" 2>&1; then
+    if ! ctest --test-dir "$dir" --no-tests=error --output-on-failure >>"$dir.test.log" 2>&1; then
         echo "  TEST FAILED (see $dir.test.log)"
+        tail -n 100 "$dir.test.log"
         FAIL=$((FAIL + 1))
         FAILED_CASES+=("${name} (test)")
         return 0
@@ -115,8 +120,8 @@ expect_configure_failure() { # <name> <cmake-args...>
     mkdir -p "build/matrix"
     echo "=== [matrix] ${name} (must fail) ==="
 
-    if cmake -S . -B "$dir" "${GEN_ARGS[@]}" \
-        -DCMAKE_BUILD_TYPE="$CMAKE_BT" "$@" >>"$dir.configure.log" 2>&1; then
+    if cmake --preset "$BUILD_TYPE" -S . -B "$dir" "${GEN_ARGS[@]}" \
+        "$@" >>"$dir.configure.log" 2>&1; then
         echo "  UNEXPECTEDLY CONFIGURED (should have failed)"
         FAIL=$((FAIL + 1))
         FAILED_CASES+=("${name} (should-fail)")
@@ -165,12 +170,18 @@ for be in $DB_BACKENDS; do
     for enc in $encs; do
         for fmt in $DFG_FORMATS; do
             for feat in $FEATURES; do
-                # shellcheck disable=SC2086
-                run_case "$(lower "$BUILD_TYPE")-$(lower "$be")-enc$(lower "$enc")-$(lower "$fmt")-$feat" \
-                    -DAPP_USERS_DATABASE_TYPE="$be" -DAPP_ENCRYPTION_USER_DATABASE="$enc" -DAPP_CONFIG_FORMAT="$fmt" \
-                    $(feature_flags "$feat") \
-                    -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
-                    -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+                for hash in $HASHES; do
+                    for vfmt in $VFMTS; do
+                        # shellcheck disable=SC2086
+                        run_case "${BUILD_TYPE}-$(lower "$be")-enc$(lower "$enc")-$(lower "$fmt")-$feat-$(lower "$hash")-ver$(lower "$vfmt")" \
+                            -DAPP_USERS_DATABASE_TYPE="$be" -DAPP_ENCRYPTION_USER_DATABASE="$enc" \
+                            -DAPP_ENABLE_SQLCIPHER=ON -DAPP_ENABLE_POSTGRESQL=ON \
+                            -DAPP_PASSWORD_HASH_ALGO="$hash" -DAPP_CONFIG_FORMAT="$fmt" \
+                            -DAPP_VERSION_FILE_FORMAT="$vfmt" $(feature_flags "$feat") \
+                            -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
+                            -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON
+                    done
+                done
             done
         done
     done
@@ -183,7 +194,7 @@ if [[ "$PARSERS" == "1" ]]; then
     for fmt in $DFG_FORMATS; do
         # shellcheck disable=SC2086
         run_case "$(lower "$BUILD_TYPE")-excl-$(lower "$fmt")" \
-            -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT="$fmt" \
+            -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENABLE_SQLCIPHER=ON -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT="$fmt" \
             -DAPP_VERSION_FILE_FORMAT="$fmt" \
             $(feature_flags minimal) \
             -DAPP_ENABLE_JSON_PARSER=$([[ "$fmt" == "JSON" ]] && echo ON || echo OFF) \
@@ -269,6 +280,7 @@ if [[ "$PG_RUN" == "1" ]]; then
         # shellcheck disable=SC2086
         run_case "$(lower "$BUILD_TYPE")-pg-users-sqlcipher-$(lower "$file")" \
             -DAPP_ENABLE_POSTGRESQL=ON -DAPP_USERS_DATABASE_TYPE=POSTGRESQL -DAPP_ENABLE_SQLCIPHER="$file" \
+            -DAPP_ENCRYPTION_USER_DATABASE=OFF \
             -DAPP_CONFIG_FORMAT=TOML $(feature_flags minimal) \
             -DAPP_ENABLE_JSON_PARSER=ON -DAPP_ENABLE_TOML_PARSER=ON \
             -DAPP_ENABLE_XML_PARSER=ON -DAPP_ENABLE_YAML_PARSER=ON

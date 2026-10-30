@@ -1,111 +1,38 @@
 name: CI
-
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
-
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  build-and-test:
-    name: ${{ matrix.preset }} on ubuntu-latest
-    runs-on: ubuntu-latest
+  presets:
+    name: ${{ matrix.preset }}
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        preset: [debug, debug-asan-ubsan, release, minsizerel]
+    uses: ./.github/workflows/build.yml
+    with:
+      preset: ${{ matrix.preset }}
+      checks: ${{ matrix.preset == 'debug' }}
+  features:
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
-        preset: [ debug, release, debug-asan-ubsan ]
-    env:
-      PGHOST: 127.0.0.1
-      PGPORT: "5433"
-      PGDATABASE: postgres
-      PGUSER: oatpp_tester
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libssl-dev \
-            zlib1g-dev \
-            libsqlcipher-dev \
-            libsqlite3-dev \
-            libpq-dev \
-            postgresql
-
-      - name: Install pinned CMake dependencies
-        run: |
-          deps_root="$RUNNER_TEMP/cmake-dependencies"
-          deps_prefix="$deps_root/install"
-          mkdir -p "$deps_root"
-          for archive in \
-            oatpp-1.3.0-latest \
-            oatpp-swagger-1.3.1 \
-            oatpp-zlib-1.3.0-latest \
-            oatpp-sqlite-1.3.0-latest \
-            oatpp-postgresql-1.3.0-latest \
-            jsoncpp-1.9.8 \
-            pugixml-1.16 \
-            toml11-4.4.0 \
-            yaml-cpp-yaml-cpp-0.9.0 \
-            jwt-cpp-v0.7.2; do
-            deps_source="$deps_root/$archive"
-            mkdir -p "$deps_source"
-            cmake -E chdir "$deps_source" cmake -E tar xf "$GITHUB_WORKSPACE/dependencies/$archive.zip"
-            if [ -f "$deps_source/$archive/CMakeLists.txt" ]; then
-              deps_source="$deps_source/$archive"
-            fi
-            deps_options=(-DBUILD_SHARED_LIBS=OFF)
-            case "$archive" in
-              oatpp-*) deps_options+=(-DOATPP_BUILD_TESTS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5) ;;
-              jsoncpp-*) deps_options+=(-DJSONCPP_WITH_TESTS=OFF -DBUILD_OBJECT_LIBS=OFF) ;;
-              yaml-cpp-*) deps_options+=(-DYAML_CPP_BUILD_TOOLS=OFF) ;;
-              jwt-cpp-*)
-                # Upstream v0.7.2 exports a stale CMake package version.
-                sed -i 's/VERSION 0\.7\.1/VERSION 0.7.2/' "$deps_source/CMakeLists.txt"
-                deps_options+=(-DJWT_BUILD_EXAMPLES=OFF)
-                ;;
-            esac
-            cmake -S "$deps_source" -B "$deps_source/build" \
-              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps_prefix" \
-              -DCMAKE_PREFIX_PATH="$deps_prefix" "${deps_options[@]}"
-            cmake --build "$deps_source/build" --parallel "$(nproc)"
-            cmake --install "$deps_source/build"
-          done
-
-      - name: Configure CMake
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/cmake-dependencies/install"
-
-      - name: Build
-        run: cmake --build --preset ${{ matrix.preset }} --parallel $(nproc)
-
-      - name: Start test PostgreSQL
-        id: postgres
-        if: matrix.preset != 'release'
-        run: |
-          pg_bin="$(pg_config --bindir)"
-          pg_root="$RUNNER_TEMP/test-postgres"
-          mkdir -m 700 "$pg_root"
-          PGPASSWORD="$(openssl rand -hex 32)"
-          echo "::add-mask::$PGPASSWORD"
-          echo "PGPASSWORD=$PGPASSWORD" >> "$GITHUB_ENV"
-          (umask 077; printf '%s' "$PGPASSWORD" > "$pg_root/password")
-          "$pg_bin/initdb" -D "$pg_root/data" -U "$PGUSER" \
-            --auth=scram-sha-256 --pwfile="$pg_root/password"
-          rm "$pg_root/password"
-          "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$pg_root/server.log" \
-            -o "-h $PGHOST -p $PGPORT -k $pg_root" -w start
-
-      - name: Run Tests
-        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --parallel $(nproc)
-
-      - name: Stop test PostgreSQL
-        if: always() && steps.postgres.outcome == 'success'
-        run: |
-          "$(pg_config --bindir)/pg_ctl" -D "$RUNNER_TEMP/test-postgres/data" -m fast -w stop
+        include:
+          - name: Plain SQLCipher / JSON / SHA256
+            options: -DAPP_USERS_DATABASE_TYPE=SQLCIPHER -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT=JSON -DAPP_PASSWORD_HASH_ALGO=SHA256 -DAPP_ENABLE_SWAGGER=OFF -DAPP_ENABLE_ZLIB=OFF
+          - name: PostgreSQL / YAML / SHA384 / no file support
+            options: -DAPP_USERS_DATABASE_TYPE=POSTGRESQL -DAPP_ENABLE_SQLCIPHER=OFF -DAPP_ENCRYPTION_USER_DATABASE=OFF -DAPP_CONFIG_FORMAT=YAML -DAPP_VERSION_FILE_FORMAT=YAML -DAPP_PASSWORD_HASH_ALGO=SHA384 -DAPP_ENABLE_SWAGGER=OFF -DAPP_ENABLE_ZLIB=OFF -DAPP_ENABLE_JSON_PARSER=OFF -DAPP_ENABLE_TOML_PARSER=OFF -DAPP_ENABLE_XML_PARSER=OFF
+    uses: ./.github/workflows/build.yml
+    with:
+      preset: debug
+      options: ${{ matrix.options }}

@@ -131,21 +131,52 @@ Each preset builds into `build/<preset-name>/`, which is git-ignored.
 
 ## Full test matrix (`scripts/test_matrix.sh`)
 
-There are intentionally no checked-in matrix presets. The full backend x
-format x feature matrix (plus parser-exclusion builds and fail-fast
-negatives) is driven by `scripts/test_matrix.sh`, which runs plain
-`cmake -S/-B` with explicit `-D` flags per combination into
-`build/matrix/<combo>/`:
+`scripts/test_matrix.sh` accepts any checked-in configure preset and overrides
+individual options into isolated `build/matrix/<case>/` directories. Case names
+include the password hash and version format to prevent cache collisions.
+Release and MinSizeRel are build-only; other presets run CTest. Missing tests
+are errors. MSan presets require a suitable Clang environment.
 
 ```bash
-scripts/test_matrix.sh debug      # 32 combos + parser checks
-scripts/test_matrix.sh release
-MATRIX_FORMATS="JSON YAML" MATRIX_BACKENDS=SQLCIPHER MATRIX_FEATURES=minimal \
-  scripts/test_matrix.sh debug    # subset
-MATRIX_PARSERS=0 scripts/test_matrix.sh debug   # skip parser checks
-MATRIX_VERSION_FORMATS="JSON TOML XML YAML" scripts/test_matrix.sh debug  # all version writers
-GENERATOR=Ninja scripts/test_matrix.sh debug    # -G Ninja
+scripts/test_matrix.sh debug        # 96 main cases plus parser/validation checks
+MATRIX_HASHES=SHA512 MATRIX_FORMATS=TOML MATRIX_FEATURES=minimal \
+  scripts/test_matrix.sh relwithdebinfo
+MATRIX_CONFIGURE_ONLY=1 MATRIX_VERSION_FORMATS="JSON TOML XML YAML" \
+  scripts/test_matrix.sh debug
+MATRIX_PG=1 scripts/test_matrix.sh debug  # require PostgreSQL cases; no auto-skip
 ```
+
+The main matrix varies backend, SQLCipher encryption, config format, feature
+bundle, password hash, and version-file format. Subset variables documented in
+the script bound the cross-product. Parser-exclusion cases and invalid-option
+checks are also included. PostgreSQL variants run automatically only when a
+server is reachable unless `MATRIX_PG=1` forces them.
+
+### GitHub Actions coverage
+
+- `ci.yml`: pushes/PRs to main/master and manual runs. Debug, ASan/UBSan,
+  Release, MinSizeRel, and two targeted backend/parser/hash variants.
+- The Debug job also runs the matrix runner's orchestration tests, sanitizer
+  configuration checks, and a configure-only cross-product of both backends,
+  three hashes, four config formats, and four version formats, plus negative
+  checks. PostgreSQL is started explicitly.
+- `extended.yml`: Mondays at 03:17 UTC or manually. Adds RelWithDebInfo,
+  RelWithDebInfo ASan/UBSan, both TSan presets, and Clang configuration checks
+  for both MSan presets. MSan runtime tests remain deferred until the C++
+  standard library and dependencies can be instrumented too.
+- The extended feature matrix runs all 16 config/version format pairs. Across
+  these cases it rotates plaintext/encrypted SQLCipher and PostgreSQL user
+  databases, SHA256/384/512, Swagger/Zlib, and parser exclusions. This is
+  selected interaction coverage, not every possible feature cross-product.
+- `.github/actions/setup/action.yml` shares dependency setup and caches the
+  complete installation, keyed by archive/setup/pin hashes, OS/architecture,
+  compiler, CMake, and system-library versions. There are no fallback restore
+  keys. Dependency versions in `cmake/dependencies.cmake` remain authoritative.
+
+Workflows use Ubuntu 24.04, read-only repository permissions, bounded
+parallelism, per-job timeouts, and cancellation of superseded runs. No build
+artifacts or releases are published. Dependabot proposes GitHub Actions updates;
+it does not update bundled library ZIPs or project version pins.
 
 ## Staged output (`out/`)
 

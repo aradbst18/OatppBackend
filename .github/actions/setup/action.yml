@@ -1,0 +1,77 @@
+name: Set up pinned dependencies
+description: Install system libraries and cache the complete bundled CMake installation.
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          cmake \
+          ninja-build \
+          pkg-config \
+          libssl-dev \
+          zlib1g-dev \
+          libsqlcipher-dev \
+          libsqlite3-dev \
+          libpq-dev \
+          postgresql
+    - name: Identify toolchain and system libraries
+      id: toolchain
+      shell: bash
+      run: |
+        signature=$({ "$CXX" --version; cmake --version; dpkg-query -W 'libssl*' 'libsqlcipher*' 'libpq*' 'libc6*' 'libstdc++*' 'zlib1g*' 'libsqlite3*'; } | sha256sum | cut -d ' ' -f 1)
+        echo "signature=$signature" >> "$GITHUB_OUTPUT"
+    - name: Cache complete dependency installation
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/cmake-dependencies/install
+        key: deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.signature }}-${{ hashFiles('dependencies/*.zip', 'cmake/dependencies.cmake', '.github/actions/setup/action.yml') }}
+    - name: Install pinned CMake dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        deps_root="$RUNNER_TEMP/cmake-dependencies"
+        deps_prefix="$deps_root/install"
+        mkdir -p "$deps_root"
+        for archive in \
+          oatpp-1.3.0-latest \
+          oatpp-swagger-1.3.1 \
+          oatpp-zlib-1.3.0-latest \
+          oatpp-sqlite-1.3.0-latest \
+          oatpp-postgresql-1.3.0-latest \
+          jsoncpp-1.9.8 \
+          pugixml-1.16 \
+          toml11-4.4.0 \
+          yaml-cpp-yaml-cpp-0.9.0 \
+          jwt-cpp-v0.7.2; do
+          deps_source="$deps_root/$archive"
+          mkdir -p "$deps_source"
+          cmake -E chdir "$deps_source" cmake -E tar xf "$GITHUB_WORKSPACE/dependencies/$archive.zip"
+          if [ -f "$deps_source/$archive/CMakeLists.txt" ]; then
+            deps_source="$deps_source/$archive"
+          fi
+          deps_options=(-DBUILD_SHARED_LIBS=OFF)
+          case "$archive" in
+            oatpp-*) deps_options+=(-DOATPP_BUILD_TESTS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5) ;;
+            jsoncpp-*) deps_options+=(-DJSONCPP_WITH_TESTS=OFF -DBUILD_OBJECT_LIBS=OFF) ;;
+            yaml-cpp-*) deps_options+=(-DYAML_CPP_BUILD_TOOLS=OFF) ;;
+            jwt-cpp-*)
+              # Upstream v0.7.2 exports a stale CMake package version.
+              sed -i 's/VERSION 0\.7\.1/VERSION 0.7.2/' "$deps_source/CMakeLists.txt"
+              deps_options+=(-DJWT_BUILD_EXAMPLES=OFF)
+              ;;
+          esac
+          cmake -S "$deps_source" -B "$deps_source/build" \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps_prefix" \
+            -DCMAKE_PREFIX_PATH="$deps_prefix" "${deps_options[@]}"
+          cmake --build "$deps_source/build" --parallel "$(nproc)"
+          cmake --install "$deps_source/build"
+        done
+    - name: Expose dependency prefix
+      shell: bash
+      run: echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/cmake-dependencies/install" >> "$GITHUB_ENV"

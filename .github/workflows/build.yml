@@ -1,0 +1,85 @@
+name: Build and test configuration
+on:
+  workflow_call:
+    inputs:
+      preset:
+        required: true
+        type: string
+      options:
+        default: ''
+        type: string
+      compiler:
+        default: gcc
+        type: string
+      configure-only:
+        default: false
+        type: boolean
+      checks:
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRESET: ${{ inputs.preset }}
+      BUILD_OPTIONS: ${{ inputs.options }}
+      CC: ${{ inputs.compiler == 'clang' && 'clang' || 'gcc' }}
+      CXX: ${{ inputs.compiler == 'clang' && 'clang++' || 'g++' }}
+      PGHOST: 127.0.0.1
+      PGPORT: '5433'
+      PGDATABASE: postgres
+      PGUSER: oatpp_tester
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Configure
+        shell: bash
+        run: |
+          read -r -a options <<< "$BUILD_OPTIONS"
+          cmake --preset "$PRESET" -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" "${options[@]}"
+      - name: Build
+        if: ${{ !inputs.configure-only }}
+        run: cmake --build --preset "$PRESET" --parallel 2
+      - name: Start test PostgreSQL
+        id: postgres
+        if: ${{ !inputs.configure-only && inputs.preset != 'release' && inputs.preset != 'minsizerel' }}
+        run: |
+          pg_bin="$(pg_config --bindir)"
+          pg_root="$RUNNER_TEMP/test-postgres"
+          mkdir -m 700 "$pg_root"
+          PGPASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$PGPASSWORD"
+          echo "PGPASSWORD=$PGPASSWORD" >> "$GITHUB_ENV"
+          (umask 077; printf '%s' "$PGPASSWORD" > "$pg_root/password")
+          "$pg_bin/initdb" -D "$pg_root/data" -U "$PGUSER" \
+            --auth=scram-sha-256 --pwfile="$pg_root/password"
+          rm "$pg_root/password"
+          "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$pg_root/server.log" \
+            -o "-h $PGHOST -p $PGPORT -k $pg_root" -w start
+      - name: Run tests
+        if: ${{ !inputs.configure-only && inputs.preset != 'release' && inputs.preset != 'minsizerel' }}
+        run: ctest --test-dir "build/$PRESET" --no-tests=error --output-on-failure --parallel 2
+      - name: Validate configuration rules
+        if: inputs.checks
+        env:
+          MATRIX_CONFIGURE_ONLY: '1'
+          MATRIX_BACKENDS: SQLCIPHER POSTGRESQL
+          MATRIX_FORMATS: JSON TOML XML YAML
+          MATRIX_VERSION_FORMATS: JSON TOML XML YAML
+          MATRIX_HASHES: SHA256 SHA384 SHA512
+          MATRIX_FEATURES: minimal
+          MATRIX_PG: '1'
+        run: |
+          python3 tests/test_ci_matrix.py
+          bash scripts/check_sanitizers.sh
+          bash scripts/test_matrix.sh debug
+      - name: Explain MSan coverage
+        if: inputs.configure-only
+        run: echo 'MSan configuration only. Runtime coverage requires an instrumented C++ standard library and dependencies.'
+      - name: Stop test PostgreSQL
+        if: ${{ always() && steps.postgres.outcome == 'success' }}
+        run: |
+          "$(pg_config --bindir)/pg_ctl" -D "$RUNNER_TEMP/test-postgres/data" -m fast -w stop
