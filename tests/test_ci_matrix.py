@@ -35,6 +35,8 @@ sys.exit(1 if negative or os.environ.get('FAIL_STAGE') == stage else 0)
 import json, os, sys
 with open(os.environ['CALLS'], 'a') as out:
     out.write(json.dumps(['test', sys.argv[1:]]) + '\\n')
+if '-pg-' in ' '.join(sys.argv[1:]) and not os.environ.get('PGHOST'):
+    sys.exit(1)  # PostgreSQL-specific cases must request inspector coverage.
 sys.exit(1 if os.environ.get('FAIL_STAGE') == 'test' else 0)
 """)
             ctest.chmod(0o755)
@@ -60,6 +62,15 @@ sys.exit(1 if os.environ.get('FAIL_STAGE') == 'test' else 0)
         for args in configs:
             self.assertEqual(args[args.index("--preset") + 1], "relwithdebinfo-asan-ubsan")
         self.assertEqual(sum(stage == "test" for stage, _ in calls), 16)
+
+    def test_postgresql_cases_enable_support(self):
+        result, calls = self.run_matrix(MATRIX_BACKENDS="POSTGRESQL", MATRIX_PG="1", PGHOST="")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        configs = [args for stage, args in calls if stage == "configure"
+                   and not any("-neg-" in a for a in args)]
+        self.assertEqual(len(configs), 11)  # 8 main cases + 3 PostgreSQL-specific cases
+        for args in configs:
+            self.assertIn("-DAPP_ENABLE_POSTGRESQL=ON", args)
 
     def test_configure_only_does_not_build_or_test(self):
         result, calls = self.run_matrix(MATRIX_CONFIGURE_ONLY="1")
