@@ -843,20 +843,30 @@ TEST_CASE("api: rate limiter trusts configured proxies and ignores spoofed chain
     EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, login("invalid"), "127.0.0.2")), 429);
 }
 
-TEST_CASE("api: cors preflight OPTIONS returns 204 with headers")
+TEST_CASE("api: cors wildcard never reflects origins or permits credentials")
 {
     auto srv = startServer();
 
-    const std::string req =
-        "OPTIONS /auth/login HTTP/1.1\r\nHost: x\r\nOrigin: http://localhost:3000\r\n"
-        "Access-Control-Request-Method: POST\r\nConnection: close\r\n\r\n";
-    const std::string resp = httpRoundTrip("127.0.0.1", srv->port, req);
+    for (const auto* method : {"GET", "OPTIONS"})
+    {
+        for (const auto* origin : {"https://evil.example.com", "null", ""})
+        {
+            std::string request = std::string(method) + " /auth/who-am-i HTTP/1.1\r\nHost: x\r\n";
+            if (*origin != '\0')
+            {
+                request += std::string("Origin: ") + origin + "\r\n";
+            }
+            request += "Access-Control-Request-Method: GET\r\nConnection: close\r\n\r\n";
+            const auto response = httpRoundTrip("127.0.0.1", srv->port, request);
 
-    EXPECT_EQ(statusOf(resp), 204);
-    EXPECT_TRUE(resp.find("Access-Control-Allow-Origin: http://localhost:3000") != std::string::npos ||
-                resp.find("Access-Control-Allow-Origin: *") != std::string::npos);
-    EXPECT_TRUE(resp.find("Access-Control-Allow-Methods:") != std::string::npos);
-    EXPECT_TRUE(resp.find("Access-Control-Allow-Headers:") != std::string::npos);
+            EXPECT_EQ(statusOf(response), std::string(method) == "OPTIONS" ? 204 : 401);
+            EXPECT_TRUE(response.find("Access-Control-Allow-Origin: *\r\n") != std::string::npos);
+            EXPECT_EQ(response.find("Access-Control-Allow-Credentials:"), std::string::npos);
+            EXPECT_TRUE(response.find("Access-Control-Allow-Methods:") != std::string::npos);
+            EXPECT_TRUE(response.find("Access-Control-Allow-Headers: Authorization,") != std::string::npos);
+            EXPECT_EQ(response.find("Vary: Origin"), std::string::npos);
+        }
+    }
 }
 
 TEST_CASE("api: cors attaches headers to responses")
@@ -871,7 +881,8 @@ TEST_CASE("api: cors attaches headers to responses")
     const std::string resp = httpRoundTrip("127.0.0.1", srv->port, req);
 
     EXPECT_EQ(statusOf(resp), 200);
-    EXPECT_TRUE(resp.find("Access-Control-Allow-Origin:") != std::string::npos);
+    EXPECT_TRUE(resp.find("Access-Control-Allow-Origin: *\r\n") != std::string::npos);
+    EXPECT_EQ(resp.find("Access-Control-Allow-Credentials:"), std::string::npos);
 }
 
 TEST_CASE("api: persisted CORS policy controls preflight and ordinary response headers")
@@ -891,7 +902,7 @@ TEST_CASE("api: persisted CORS policy controls preflight and ordinary response h
         for (const auto* origin :
              {"https://app.example.com", "http://localhost:3000", "http://app_service:3000",
               "https://app_service.example.com", "https://app-service.example.com", "https://evil.example.com",
-              "https://sub.app.example.com", "https://app.example.com:8443", "http://app.example.com", ""})
+              "https://sub.app.example.com", "https://app.example.com:8443", "http://app.example.com", "null", ""})
         {
             std::string request = std::string(method) + " /auth/who-am-i HTTP/1.1\r\nHost: x\r\n";
             if (*origin != '\0')
@@ -901,6 +912,7 @@ TEST_CASE("api: persisted CORS policy controls preflight and ordinary response h
             request += "Access-Control-Request-Method: GET\r\nConnection: close\r\n\r\n";
             const auto response = httpRoundTrip("127.0.0.1", srv->port, request);
             EXPECT_EQ(statusOf(response), std::string(method) == "OPTIONS" ? 204 : 401);
+            EXPECT_TRUE(response.find("Vary: Origin\r\n") != std::string::npos);
 
             const std::string originText(origin);
             if (originText == "https://app.example.com" || originText == "http://localhost:3000" ||
@@ -908,12 +920,61 @@ TEST_CASE("api: persisted CORS policy controls preflight and ordinary response h
             {
                 EXPECT_TRUE(response.find("Access-Control-Allow-Origin: " + originText + "\r\n") != std::string::npos);
                 EXPECT_TRUE(response.find("Access-Control-Allow-Credentials: true\r\n") != std::string::npos);
-                EXPECT_TRUE(response.find("Vary: Origin\r\n") != std::string::npos);
             }
             else
             {
                 EXPECT_EQ(response.find("Access-Control-"), std::string::npos);
             }
+        }
+    }
+}
+
+TEST_CASE("api: cors preserves existing Vary fields without duplicating Origin")
+{
+    middlewares::CorsInterceptor cors("https://app.example.com");
+    struct Example
+    {
+        std::vector<std::string> initial;
+        std::multiset<std::string> expected;
+    };
+    const Example examples[] = {
+        {{}, {"Origin"}},
+        {{"Accept-Encoding"}, {"Accept-Encoding", "Origin"}},
+        {{"Accept-Encoding", "Accept-Language"}, {"Accept-Encoding", "Accept-Language", "Origin"}},
+        {{"oRiGiN"}, {"oRiGiN"}},
+        {{"Accept-Encoding, oRiGiN"}, {"Accept-Encoding, oRiGiN"}},
+        {{"Accept-Encoding", "origin"}, {"Accept-Encoding", "origin"}},
+        {{"*"}, {"*"}},
+    };
+    for (const auto* origin : {"https://app.example.com", "https://evil.example.com", ""})
+    {
+        oatpp::web::protocol::http::Headers headers;
+        if (*origin != '\0')
+        {
+            headers.put("Origin", origin);
+        }
+        const auto request =
+            middlewares::CorsInterceptor::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
+        for (const auto& example : examples)
+        {
+            const auto response = oatpp::web::protocol::http::outgoing::ResponseFactory::createResponse(
+                oatpp::web::protocol::http::Status::CODE_200, "");
+            for (const auto& value : example.initial)
+            {
+                response->putHeader("Vary", value);
+            }
+            cors.intercept(request, response);
+            cors.intercept(request, response);
+
+            std::multiset<std::string> actual;
+            for (const auto& header : response->getHeaders().getAll())
+            {
+                if (header.first == "Vary")
+                {
+                    actual.insert(header.second.std_str());
+                }
+            }
+            EXPECT_TRUE(actual == example.expected);
         }
     }
 }

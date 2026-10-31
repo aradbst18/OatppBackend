@@ -51,25 +51,31 @@ void CorsInterceptor::attachCorsHeaders(const std::shared_ptr<IncomingRequest>& 
     std::string origin = originHeader ? std::string(*originHeader) : "";
 
     std::string effectiveOrigin = "*";
-    if (allowAllOrigins_)
+    if (!allowAllOrigins_)
     {
-        effectiveOrigin = origin.empty() ? "*" : origin;
-    }
-    else if (!origin.empty() && isOriginAllowed(origin))
-    {
+        oatpp::web::protocol::http::HeaderValueData vary;
+        const auto varyHeaders = response->getHeaders().getAll().equal_range("Vary");
+        for (auto header = varyHeaders.first; header != varyHeaders.second; ++header)
+        {
+            oatpp::web::protocol::http::Parser::parseHeaderValueData(vary, header->second, ',');
+        }
+        if (vary.tokens.count("Origin") == 0 && vary.tokens.count("*") == 0)
+        {
+            response->putHeader("Vary", "Origin");
+        }
+
+        if (origin.empty() || !isOriginAllowed(origin))
+        {
+            return;
+        }
         effectiveOrigin = origin;
-        response->putOrReplaceHeader("Vary", "Origin");
-    }
-    else if (!allowAllOrigins_)
-    {
-        return;
+        response->putOrReplaceHeader("Access-Control-Allow-Credentials", "true");
     }
 
     response->putOrReplaceHeader("Access-Control-Allow-Origin", effectiveOrigin);
     response->putOrReplaceHeader("Access-Control-Allow-Methods", allowedMethods_);
     response->putOrReplaceHeader("Access-Control-Allow-Headers", allowedHeaders_);
     response->putOrReplaceHeader("Access-Control-Max-Age", maxAgeSeconds_);
-    response->putOrReplaceHeader("Access-Control-Allow-Credentials", "true");
 }
 
 std::shared_ptr<CorsInterceptor::OutgoingResponse> CorsInterceptor::intercept(

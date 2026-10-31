@@ -183,15 +183,23 @@ application construction. A missing setting keeps the existing `"*"` default
 and is recorded for configuration completion. Generated files and all four
 sample files include the setting; quote `"*"` in YAML.
 
-Allowed origins receive `Access-Control-Allow-Origin` with that origin and
-`Access-Control-Allow-Credentials: true`. Restricted policies also set
-`Vary: Origin` for allowed requests. Disallowed origins receive no CORS
-permission headers, including on preflight OPTIONS responses (which remain
-HTTP 204). Requests without an Origin receive no CORS permission headers
-under a restricted policy. CORS does not replace authentication or authorization.
+The wildcard policy sends literal `Access-Control-Allow-Origin: *` and omits
+`Access-Control-Allow-Credentials`, including on requests without an Origin.
+It does not reflect the requesting origin. Browser clients using
+`credentials: "include"` must use an explicit allowlist instead.
 
-The compatibility default remains permissive; configure an explicit allowlist
-to restrict browser access, especially because credentialed CORS is enabled.
+An explicit allowlist sends `Access-Control-Allow-Origin` with the matching
+origin and `Access-Control-Allow-Credentials: true`. Disallowed origins receive
+no CORS permission headers, including on preflight OPTIONS responses (which
+remain HTTP 204). Requests without an Origin receive no CORS permission headers
+under a restricted policy.
+
+Restricted policies add `Origin` to `Vary` on every response, including rejected
+and no-Origin requests, while preserving existing values. An existing `Vary: *`
+already covers Origin. The constant wildcard policy needs no `Vary: Origin`.
+CORS does not replace authentication or authorization. The default still allows
+every origin without credential permission; configure an explicit allowlist to
+restrict browser access.
 
 ## Settings completeness
 
