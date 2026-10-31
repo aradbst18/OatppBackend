@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -252,7 +253,15 @@ bool passwordVerify(const std::string& password, const std::string& storedHash)
     }
 
     const std::string& algorithm = parts[0];
-    const int iterations = std::stoi(parts[1]);
+    const std::string& encoded_iterations = parts[1];
+    int iterations = 0;
+    const auto parsed =
+        std::from_chars(encoded_iterations.data(), encoded_iterations.data() + encoded_iterations.size(), iterations);
+    if (parsed.ec != std::errc{} || parsed.ptr != encoded_iterations.data() + encoded_iterations.size() ||
+        iterations <= 0)
+    {
+        throw errors::crypto::KeyInvalid("Invalid iteration count in stored password hash");
+    }
     const auto salt = base64Decode(parts[2]);
     const auto expected = base64Decode(parts[3]);
 
@@ -262,7 +271,7 @@ bool passwordVerify(const std::string& password, const std::string& storedHash)
         throw errors::crypto::KeyInvalid("Unknown PRF in stored password hash: " + algorithm);
     }
 
-    if (iterations <= 0 || salt.empty() || expected.empty())
+    if (salt.empty() || expected.empty())
     {
         throw errors::crypto::KeyInvalid("Invalid parameters in stored password hash");
     }
