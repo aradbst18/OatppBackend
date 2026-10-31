@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdio>
 #include <future>
+#include <vector>
 
 #include "support/TestDb.hpp"
 
@@ -560,4 +561,33 @@ TEST_CASE("database: salted password hash produces unique outputs and verifies")
 
     // Case sensitive.
     EXPECT_FALSE(auth::passwordVerify("ALICE1234", h1));
+}
+
+TEST_CASE("database: password hash rejects malformed iteration counts")
+{
+    const std::string valid_hash = auth::passwordHash("Alice1234");
+    const auto iteration_start = valid_hash.find('$', 1) + 1;
+    const auto iteration_end = valid_hash.find('$', iteration_start);
+    const std::vector<std::string> invalid_iterations = {"abc",
+                                                         "",
+                                                         "2147483648",
+                                                         "999999999999999999999999",
+                                                         "-2147483649",
+                                                         "0",
+                                                         "-1",
+                                                         "+100000",
+                                                         " 100000",
+                                                         "\t100000",
+                                                         "100000 ",
+                                                         "100000junk",
+                                                         "1e5",
+                                                         "0x186a0",
+                                                         std::string("100000\0junk", 11)};
+
+    for (const auto& iterations : invalid_iterations)
+    {
+        const std::string malformed_hash =
+            valid_hash.substr(0, iteration_start) + iterations + valid_hash.substr(iteration_end);
+        EXPECT_THROW_AS(auth::passwordVerify("Alice1234", malformed_hash), errors::crypto::KeyInvalid);
+    }
 }

@@ -303,6 +303,19 @@ TEST_CASE("auth: login rejects wrong password")
     EXPECT_THROW_AS(svc->login("admin", "Wrong1234"), errors::authentication::InvalidCredentials);
 }
 
+TEST_CASE("auth: malformed stored hash iterations raise crypto errors in login and bootstrap")
+{
+    AuthFixture fixture;
+    fixture.service->ensureSeeded("admin", kTestAdminPassword);
+
+    for (const std::string iterations : {"abc", "2147483648", "100000junk"})
+    {
+        fixture.users->updatePassword("admin", "$pbkdf2-sha256$" + iterations + "$c2FsdA==$aGFzaA==");
+        EXPECT_THROW_AS(fixture.service->login("admin", kTestAdminPassword), errors::crypto::KeyInvalid);
+        EXPECT_THROW_AS(fixture.service->ensureSeeded("admin", kTestAdminPassword), errors::crypto::KeyInvalid);
+    }
+}
+
 TEST_CASE("auth: login rejects unknown user with 401 (not 404)")
 {
     auto svc = makeService();
