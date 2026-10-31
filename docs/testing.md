@@ -61,13 +61,22 @@ retain it for retry, and make the test process fail.
 
 Builds with `APP_ENABLE_POSTGRESQL=ON` link libpq; builds with
 `APP_USERS_DATABASE_TYPE=POSTGRESQL` additionally require a reachable
-server for every test run (the users table lives there). File-users
-builds only need the server for the `postgres inspector` cases in
-`test_generic_document.cpp`. When the inspector test is selected, its server is
-required: connection, authentication, and database-creation failures fail the
-test. Disable PostgreSQL support for builds that do not need this coverage;
-provisioning exceptions never count as skips. Connection parameters come from the
-environment with local-throwaway defaults. Full-application PostgreSQL tests
+server for every test run (the users table lives there).
+
+The checked-in presets retain PostgreSQL support alongside SQLCipher user
+storage. In these file-users builds, the PostgreSQL inspector reports `[SKIP]`
+when `PGHOST` is unset or empty, so default CTest runs need no PostgreSQL server.
+Set `PGHOST` to a host or socket directory to request inspector coverage:
+connection, authentication, and database-creation errors then fail the test.
+PostgreSQL-users builds always require the server, even without `PGHOST`.
+Provisioning exceptions never count as skips.
+
+CI builds the presets as written, sets `PGHOST`, and starts a disposable server
+for PostgreSQL coverage. Its plain SQLCipher feature job explicitly disables
+PostgreSQL support to also cover builds without it.
+
+Connection parameters come from `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and
+`PGPASSWORD`, with local-throwaway defaults. Full-application PostgreSQL tests
 require a private `PGPASSWORD`; the old published `oatpp_test_pw` is rejected
 by application configuration validation:
 
@@ -92,9 +101,13 @@ pg_ctl -D /tmp/opencode/pgdata stop
 ```
 
 `PGDATABASE` selects the maintenance database for test provisioning
-(default `postgres`). `scripts/test_matrix.sh` runs its PostgreSQL
-combos only when `pg_isready` answers at `$PGHOST:$PGPORT` (`MATRIX_PG=1`
-forces, `MATRIX_PG=0` skips).
+(default `postgres`). `scripts/test_matrix.sh` runs its additional PostgreSQL
+combos only when
+`pg_isready` answers at `$PGHOST:$PGPORT` (`MATRIX_PG=1` forces,
+`MATRIX_PG=0` skips). Explicitly selecting `POSTGRESQL` in `MATRIX_BACKENDS`
+also requires a server for those main cases. The additional PostgreSQL cases
+set `PGHOST` to its local default if necessary, so forced inspector coverage
+cannot silently skip.
 
 Provisioning never scans for or deletes databases by prefix. Databases left
 by a crash are deliberately preserved; use a disposable cluster per run or

@@ -85,6 +85,7 @@ compile_commands.json
 # ── Package-manager & cache directories ─────────────────────────────
 vcpkg_installed/
 .cache/
+__pycache__/
 
 # ── Local archives & scratch ────────────────────────────────────────
 archives/

@@ -275,6 +275,7 @@ elif [[ "$PG_MODE" == "auto" ]] && command -v pg_isready >/dev/null 2>&1 &&
 fi
 
 if [[ "$PG_RUN" == "1" ]]; then
+    export PGHOST="${PGHOST:-127.0.0.1}"
     # Users database on PostgreSQL, with and without file support alongside it.
     for file in ON OFF; do
         # shellcheck disable=SC2086

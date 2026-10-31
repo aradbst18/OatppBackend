@@ -344,6 +344,13 @@ TEST_CASE("generic: database inspector dumps arbitrary database files")
 #ifdef APP_WITH_POSTGRESQL
 TEST_CASE("generic: postgresql inspector dumps server databases")
 {
+#ifndef APP_DATABASE_POSTGRESQL
+    if (tests::testEnv("PGHOST", "").empty())
+    {
+        tests::skip("Set PGHOST to run the optional PostgreSQL inspector test");
+    }
+#endif  // APP_DATABASE_POSTGRESQL
+
     const tests::PgTestParams params = tests::pgTestParams();
     const std::string name = tests::makeUniquePgTestDb(params);
 

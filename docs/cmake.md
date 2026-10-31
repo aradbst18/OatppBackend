@@ -118,6 +118,12 @@ cmake --preset debug-asan-ubsan -DENABLE_SANITIZERS=OFF   # any preset, sanitize
 bash scripts/check_sanitizers.sh               # configure-only matrix check
 ```
 
+The presets retain PostgreSQL support alongside SQLCipher user databases.
+The optional PostgreSQL inspector test skips unless `PGHOST` selects a test
+server; PostgreSQL-users builds always require a server (see `docs/testing.md`).
+CI tests the presets as written with a test server, and its plain SQLCipher
+feature job sets `-DAPP_ENABLE_POSTGRESQL=OFF` to cover that configuration too.
+
 `CMakeUserPresets.json` (local overlay, Ninja + `-ninja` names, `jobs: 6`)
 mirrors all ten configurations for day-to-day development — `debug-ninja` is
 the `scripts/build.sh` default, `debug-asan-ubsan-ninja` the instrumented
@@ -149,8 +155,10 @@ MATRIX_PG=1 scripts/test_matrix.sh debug  # require PostgreSQL cases; no auto-sk
 The main matrix varies backend, SQLCipher encryption, config format, feature
 bundle, password hash, and version-file format. Subset variables documented in
 the script bound the cross-product. Parser-exclusion cases and invalid-option
-checks are also included. PostgreSQL variants run automatically only when a
-server is reachable unless `MATRIX_PG=1` forces them.
+checks are also included. Additional PostgreSQL variants run automatically only
+when a server is reachable
+unless `MATRIX_PG=1` forces them. Explicit `MATRIX_BACKENDS=POSTGRESQL` main cases
+enable PostgreSQL support and require a server regardless of `MATRIX_PG`.
 
 ### GitHub Actions coverage
 

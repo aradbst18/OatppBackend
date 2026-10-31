@@ -66,7 +66,8 @@ add_test(NAME test_test_runner COMMAND test_runner_tests)
 
 if(APP_ENABLE_POSTGRESQL)
     add_test(NAME test_postgresql_inspector_unavailable
-             COMMAND ${CMAKE_COMMAND} -DAPP_TESTS=$<TARGET_FILE:app_tests> -P
+             COMMAND ${CMAKE_COMMAND} -DAPP_TESTS=$<TARGET_FILE:app_tests>
+                     -DAPP_USERS_DATABASE_TYPE=${APP_USERS_DATABASE_TYPE} -P
                      ${CMAKE_CURRENT_SOURCE_DIR}/test_postgresql_inspector_unavailable.cmake)
 endif()
 
