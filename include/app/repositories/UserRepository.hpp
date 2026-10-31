@@ -100,7 +100,7 @@ private:
           "UPDATE " + tableName() +
               " SET password_hash = :user.password_hash, role = :user.role, session_version = session_version + 1 "
               "WHERE username = "
-              ":user.username;",
+              ":user.username RETURNING id;",
           PARAM(oatpp::Object<UserDto>, user))
 
     QUERY(updatePasswordImp,
