@@ -100,8 +100,8 @@ void UserRepository::updateUser(const oatpp::Object<UserDto>& user)
 {
     checkUser(user);
 
-    updateUserImp(user);
-    if (!isUserExists(user->username))
+    const auto rows = fetch<oatpp::Vector<oatpp::Fields<oatpp::String>>>(updateUserImp(user));
+    if (rows->empty())
     {
         throw errors::database::RecordNotFound("username(" + textOf(user->username) + ") does not exist");
     }

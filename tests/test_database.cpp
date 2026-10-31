@@ -194,6 +194,66 @@ TEST_CASE("database: repository crud")
     EXPECT_TRUE(repo.listUsers()->empty());
 }
 
+TEST_CASE("database: user update rejects a user created after the update statement")
+{
+#ifdef APP_DATABASE_POSTGRESQL
+    using Backend = infrastructure::database::PostgresqlDatabase;
+#else
+    using Backend = infrastructure::database::SqlcipherDatabase;
+#endif
+
+    class ConcurrentCreationDatabase : public Backend
+    {
+    public:
+        using Backend::Backend;
+        bool createAfterNextStatement = false;
+
+        std::shared_ptr<oatpp::orm::QueryResult> executeOrm(
+            const oatpp::data::share::StringTemplate& query,
+            const std::unordered_map<oatpp::String, oatpp::Void>& params,
+            const std::shared_ptr<const oatpp::data::mapping::TypeResolver>& typeResolver,
+            const oatpp::provider::ResourceHandle<oatpp::orm::Connection>& connection) override
+        {
+            auto result = Backend::executeOrm(query, params, typeResolver, connection);
+            if (createAfterNextStatement)
+            {
+                createAfterNextStatement = false;
+                // Pin the concurrent creation between the UPDATE and any later existence probe.
+                const auto insert =
+                    ormExecutor()->parseQueryTemplate("concurrent-user",
+                                                      "INSERT INTO users (id, username, password_hash, role) "
+                                                      "VALUES ('new-account', 'ghost', 'concurrent-hash', 'viewer');",
+                                                      {}, false);
+                Backend::executeOrm(insert, {}, nullptr, result->getConnection());
+            }
+            return result;
+        }
+    };
+
+#ifdef APP_DATABASE_POSTGRESQL
+    const auto params = tests::pgTestParams();
+    auto db = std::make_shared<ConcurrentCreationDatabase>(params.path, params.port, tests::makeUniquePgTestDb(params),
+                                                           params.user, params.key);
+#else
+    auto db = std::make_shared<ConcurrentCreationDatabase>(":memory:", tests::testDatabaseKey());
+#endif
+    db->open();
+    repositories::UserRepository repo(db);
+    repo.ensureSchema();
+
+    auto user = oatpp::Object<repositories::UserDto>::createShared();
+    user->username = "ghost";
+    user->passwordHash = "requested-hash";
+    user->role = "admin";
+    db->createAfterNextStatement = true;
+
+    EXPECT_THROW_AS(repo.updateUser(user), errors::database::RecordNotFound);
+    const auto created = repo.getUser("ghost");
+    EXPECT_EQ(*created->passwordHash, std::string("concurrent-hash"));
+    EXPECT_EQ(*created->role, std::string("viewer"));
+    EXPECT_EQ(created->sessionVersion.getValue(-1), 0);
+}
+
 TEST_CASE("database: repository transactions commit and roll back")
 {
     // DbClient transactions run through the same seam: BEGIN/COMMIT/ROLLBACK
