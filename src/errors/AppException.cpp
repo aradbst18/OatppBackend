@@ -41,6 +41,10 @@ const char* toString(ErrorCode code) noexcept
             return "ResourceUnavailable";
         case ErrorCode::ValidationInvalidValue:
             return "ValidationInvalidValue";
+        case ErrorCode::ValidationPasswordFormat:
+            return "ValidationPasswordFormat";
+        case ErrorCode::ValidationPasswordTooCommon:
+            return "ValidationPasswordTooCommon";
         case ErrorCode::FileNotFound:
             return "FileNotFound";
         case ErrorCode::FileReadFailed:
@@ -131,6 +135,8 @@ int toHttpStatus(ErrorCode code) noexcept
         case ErrorCode::UnsupportedMediaType:
             return 415;
         case ErrorCode::ValidationInvalidValue:
+        case ErrorCode::ValidationPasswordFormat:
+        case ErrorCode::ValidationPasswordTooCommon:
             return 422;
         case ErrorCode::RateLimited:
             return 429;

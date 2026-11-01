@@ -125,7 +125,7 @@ The bootstrap username defaults to `admin`; set `APP_SEED_ADMIN_USERNAME` to
 choose another name and keep that setting on subsequent starts. There is no
 default password. Once the account exists, the bootstrap password may be
 removed from the environment. See [administrator provisioning](docs/authentication.md#administrator-provisioning)
-for validation and migration from the old sample password.
+for the shared password policy and provisioning details.
 
 VS Code server debug configurations prompt for this password. Enter it on the
 first start; leave the prompt blank on later starts. The prompt overrides any

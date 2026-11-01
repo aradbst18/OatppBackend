@@ -61,14 +61,6 @@ std::string AuthService::ensureSeeded(const std::string& customUsername, const s
             throw errors::config::Invalid("Bootstrap account must be an administrator with a stored password hash");
         }
 
-        if (auth::passwordVerify("Admin1234", std::string(*existing->passwordHash)))
-        {
-            throw errors::config::Invalid(
-                "Bootstrap administrator still uses the published sample password; reset its stored password "
-                "and invalidate its sessions before restarting. APP_SEED_ADMIN_PASSWORD does not reset existing "
-                "accounts");
-        }
-
         logging::logInfo("auth", "Admin account '" + seedUser + "' already present; database ready");
         return seedUser;
     }
@@ -87,14 +79,13 @@ std::string AuthService::ensureSeeded(const std::string& customUsername, const s
     {
         throw errors::config::Missing("APP_SEED_ADMIN_PASSWORD is required to create the initial administrator");
     }
-    if (seedPass == "Admin1234")
+    try
     {
-        throw errors::config::Invalid("Bootstrap admin password must not be the published sample password");
+        validation::validatePassword(seedPass);
     }
-    if (!validation::isValidPassword(seedPass) || seedPass.find('\0') != std::string::npos)
+    catch (const errors::AppException& error)
     {
-        throw errors::config::Invalid(
-            "Bootstrap admin password must be 6-48 characters with a letter and a digit, without NUL characters");
+        throw errors::config::Invalid(error.what());
     }
 
     auto user = oatpp::Object<repositories::UserDto>::createShared();
@@ -109,16 +100,15 @@ std::string AuthService::ensureSeeded(const std::string& customUsername, const s
 
 LoginResult AuthService::login(const std::string& username, const std::string& password)
 {
-    // Shape validation first (422), then credential check (401) so clients can
-    // distinguish malformed input from wrong credentials.
+    // Login must accept existing credentials independently of the new-password policy.
     if (!validation::isValidUsername(username))
     {
         throw errors::validation::InvalidValue("Invalid username: 4-18 chars of [a-zA-Z0-9@#$]");
     }
 
-    if (!validation::isValidPassword(password))
+    if (password.empty() || password.size() > 128 * 4)
     {
-        throw errors::validation::InvalidValue("Invalid password: 6-48 chars with a letter and a digit");
+        throw errors::validation::InvalidValue("Login password must contain 1-512 bytes");
     }
 
     auto transaction = users_->beginTransaction();

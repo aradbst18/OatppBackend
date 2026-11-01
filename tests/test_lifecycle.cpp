@@ -84,7 +84,11 @@ TEST_CASE("lifecycle: managed thread stop is idempotent")
 TEST_CASE("lifecycle: managed thread restarts after natural completion")
 {
     std::atomic<int> calls{0};
-    application::ManagedThread worker("short-lived", [&](const std::atomic<bool>&) { ++calls; });
+    application::ManagedThread worker("short-lived",
+                                      [&](const std::atomic<bool>&)
+                                      {
+                                          ++calls;
+                                      });
 
     for (int run = 1; run <= 3; ++run)
     {
@@ -107,7 +111,9 @@ TEST_CASE("lifecycle: managed thread recovers from a failing work copy")
         bool& fail;
         std::atomic<int>& calls;
 
-        Work(bool& shouldFail, std::atomic<int>& count) : fail(shouldFail), calls(count) {}
+        Work(bool& shouldFail, std::atomic<int>& count) : fail(shouldFail), calls(count)
+        {
+        }
         Work(const Work& other) : fail(other.fail), calls(other.calls)
         {
             if (fail)
@@ -115,7 +121,10 @@ TEST_CASE("lifecycle: managed thread recovers from a failing work copy")
                 throw std::runtime_error("forced work copy failure");
             }
         }
-        void operator()(const std::atomic<bool>&) const { ++calls; }
+        void operator()(const std::atomic<bool>&) const
+        {
+            ++calls;
+        }
     };
 
     bool fail = false;
@@ -136,20 +145,26 @@ TEST_CASE("lifecycle: managed thread recovers from a failing work copy")
 TEST_CASE("lifecycle: concurrent managed thread starts launch only one worker")
 {
     std::atomic<int> calls{0};
-    application::ManagedThread worker("concurrent-start", [&](const std::atomic<bool>& stop)
-                                     {
-                                         ++calls;
-                                         while (!stop.load())
-                                         {
-                                             std::this_thread::yield();
-                                         }
-                                     });
+    application::ManagedThread worker("concurrent-start",
+                                      [&](const std::atomic<bool>& stop)
+                                      {
+                                          ++calls;
+                                          while (!stop.load())
+                                          {
+                                              std::this_thread::yield();
+                                          }
+                                      });
     std::promise<void> start;
     const auto ready = start.get_future().share();
     std::vector<std::future<void>> callers;
     for (int i = 0; i < 12; ++i)
     {
-        callers.push_back(std::async(std::launch::async, [&] { ready.wait(); worker.start(); }));
+        callers.push_back(std::async(std::launch::async,
+                                     [&]
+                                     {
+                                         ready.wait();
+                                         worker.start();
+                                     }));
     }
     start.set_value();
     for (auto& caller : callers)
@@ -165,19 +180,20 @@ TEST_CASE("lifecycle: managed thread serializes concurrent start stop and join")
 {
     std::atomic<int> active{0};
     std::atomic<bool> overlap{false};
-    application::ManagedThread worker("lifecycle-race", [&](const std::atomic<bool>& stop)
-                                     {
-                                         if (active.fetch_add(1) != 0)
-                                         {
-                                             overlap.store(true);
-                                         }
-                                         // A join may follow the last stop and wait on a fresh run.
-                                         for (int tick = 0; tick < 500 && !stop.load(); ++tick)
-                                         {
-                                             std::this_thread::yield();
-                                         }
-                                         --active;
-                                     });
+    application::ManagedThread worker("lifecycle-race",
+                                      [&](const std::atomic<bool>& stop)
+                                      {
+                                          if (active.fetch_add(1) != 0)
+                                          {
+                                              overlap.store(true);
+                                          }
+                                          // A join may follow the last stop and wait on a fresh run.
+                                          for (int tick = 0; tick < 500 && !stop.load(); ++tick)
+                                          {
+                                              std::this_thread::yield();
+                                          }
+                                          --active;
+                                      });
     for (int round = 0; round < 20; ++round)
     {
         worker.start();
@@ -186,7 +202,8 @@ TEST_CASE("lifecycle: managed thread serializes concurrent start stop and join")
         std::vector<std::future<void>> callers;
         for (int i = 0; i < 12; ++i)
         {
-            callers.push_back(std::async(std::launch::async, [&, i]
+            callers.push_back(std::async(std::launch::async,
+                                         [&, i]
                                          {
                                              ready.wait();
                                              if (i % 3 == 0)
@@ -213,24 +230,29 @@ TEST_CASE("lifecycle: managed thread stop can signal during an external join")
 {
     std::promise<void> entered;
     bool expired = false;
-    application::ManagedThread worker("join-then-stop", [&](const std::atomic<bool>& stop)
-                                     {
-                                         entered.set_value();
-                                         const auto deadline = std::chrono::steady_clock::now() +
-                                                               std::chrono::seconds(2);
-                                         while (!stop.load())
-                                         {
-                                             if (std::chrono::steady_clock::now() >= deadline)
-                                             {
-                                                 expired = true;
-                                                 break;
-                                             }
-                                             std::this_thread::yield();
-                                         }
-                                     });
+    application::ManagedThread worker("join-then-stop",
+                                      [&](const std::atomic<bool>& stop)
+                                      {
+                                          entered.set_value();
+                                          const auto deadline =
+                                              std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                                          while (!stop.load())
+                                          {
+                                              if (std::chrono::steady_clock::now() >= deadline)
+                                              {
+                                                  expired = true;
+                                                  break;
+                                              }
+                                              std::this_thread::yield();
+                                          }
+                                      });
     worker.start();
     entered.get_future().wait();
-    auto joiner = std::async(std::launch::async, [&] { worker.join(); });
+    auto joiner = std::async(std::launch::async,
+                             [&]
+                             {
+                                 worker.join();
+                             });
     const auto status = joiner.wait_for(std::chrono::milliseconds(20));
     worker.stop();
     joiner.get();
@@ -245,18 +267,23 @@ TEST_CASE("lifecycle: managed thread self calls do not block an external join")
     std::promise<void> release;
     const auto ready = release.get_future().share();
     bool stopObserved = false;
-    application::ManagedThread worker("self-calls", [&](const std::atomic<bool>& stop)
-                                     {
-                                         entered.set_value();
-                                         ready.wait();
-                                         worker.start();
-                                         worker.join();
-                                         worker.stop();
-                                         stopObserved = stop.load();
-                                     });
+    application::ManagedThread worker("self-calls",
+                                      [&](const std::atomic<bool>& stop)
+                                      {
+                                          entered.set_value();
+                                          ready.wait();
+                                          worker.start();
+                                          worker.join();
+                                          worker.stop();
+                                          stopObserved = stop.load();
+                                      });
     worker.start();
     entered.get_future().wait();
-    auto joiner = std::async(std::launch::async, [&] { worker.join(); });
+    auto joiner = std::async(std::launch::async,
+                             [&]
+                             {
+                                 worker.join();
+                             });
     const auto status = joiner.wait_for(std::chrono::milliseconds(20));
     release.set_value();
     joiner.get();
@@ -268,7 +295,7 @@ TEST_CASE("lifecycle: managed thread self calls do not block an external join")
 TEST_CASE("lifecycle: application initialize is idempotent")
 {
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     application::Application app(applicationSettings());
     app.initialize();
     app.initialize();
@@ -296,7 +323,7 @@ TEST_CASE("lifecycle: refresh cleanup retries after failure and stops before dat
         }
     } state;
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     auto settings = applicationSettings();
 #ifdef APP_DATABASE_SQLCIPHER
     settings.databasePath = state.path;
@@ -363,7 +390,7 @@ TEST_CASE("lifecycle: refresh cleanup retries after failure and stops before dat
 TEST_CASE("lifecycle: concurrent initialization publishes complete shared objects")
 {
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     application::Application app(applicationSettings());
     std::promise<void> start;
     const auto ready = start.get_future().share();
@@ -398,7 +425,7 @@ TEST_CASE("lifecycle: concurrent initialization publishes complete shared object
         EXPECT_TRUE(snapshot == objects.front());
     }
     EXPECT_TRUE(app.database()->isOpen());
-    EXPECT_EQ(app.authService()->login("admin", "TestAdmin8391").role, std::string("admin"));
+    EXPECT_EQ(app.authService()->login("admin", "TestAdmin8391-safe").role, std::string("admin"));
     EXPECT_EQ(app.userService()->listUsers().size(), 1U);
 }
 
@@ -421,7 +448,7 @@ TEST_CASE("lifecycle: startup failure persists until a new application is constr
         EXPECT_TRUE(failure != nullptr);
 
         const tests::ScopedEnvironment fixedUsername("APP_SEED_ADMIN_USERNAME", "admin");
-        const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+        const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
         for (int repeat = 0; repeat < 2; ++repeat)
         {
             std::exception_ptr repeated;
@@ -447,17 +474,17 @@ TEST_CASE("lifecycle: startup failure persists until a new application is constr
     }
 
     const tests::ScopedEnvironment fixedUsername("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment fixedPassword("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     application::Application recovered(settings);
     recovered.initialize();
     EXPECT_TRUE(recovered.database()->isOpen());
-    EXPECT_EQ(recovered.authService()->login("admin", "TestAdmin8391").role, std::string("admin"));
+    EXPECT_EQ(recovered.authService()->login("admin", "TestAdmin8391-safe").role, std::string("admin"));
 }
 
 TEST_CASE("lifecycle: shutdown is synchronized with initialization")
 {
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     application::Application app(applicationSettings());
     std::promise<void> start;
     const auto ready = start.get_future().share();
@@ -527,10 +554,10 @@ TEST_CASE("lifecycle: application startup requires explicit initial administrato
     EXPECT_FALSE(app.isRunning());
 }
 
-TEST_CASE("lifecycle: application startup rejects the published bootstrap password")
+TEST_CASE("lifecycle: application startup rejects a password below the shared minimum")
 {
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "Admin1234");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "too-short");
     application::Application app(applicationSettings());
     EXPECT_THROW_AS(app.initialize(), errors::config::Invalid);
     EXPECT_FALSE(app.isRunning());
@@ -548,18 +575,18 @@ TEST_CASE("lifecycle: custom bootstrap administrator is protected by user manage
         }
     } file;
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "customAdmin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     auto settings = applicationSettings();
 #ifdef APP_DATABASE_SQLCIPHER
     settings.databasePath = file.path;
 #endif
     application::Application app(settings);
     app.initialize();
-    EXPECT_EQ(app.authService()->login("customAdmin", "TestAdmin8391").role, std::string("admin"));
+    EXPECT_EQ(app.authService()->login("customAdmin", "TestAdmin8391-safe").role, std::string("admin"));
 
     auto users = app.userService();
     EXPECT_THROW_AS(users->deleteUser("customAdmin"), errors::authorization::ResourceAccessDenied);
-    const services::UpdateUserInput rename("renamedAdmin", "TestAdmin8391", "admin");
+    const services::UpdateUserInput rename("renamedAdmin", "TestAdmin8391-safe", "admin");
     EXPECT_THROW_AS(users->updateUser("customAdmin", rename), errors::authorization::ResourceAccessDenied);
     services::PatchUserInput patch;
     patch.username = "renamedAdmin";
@@ -571,7 +598,7 @@ TEST_CASE("lifecycle: custom bootstrap administrator is protected by user manage
     patch.role = "viewer";
     EXPECT_THROW_AS(users->patchUser("customAdmin", patch), errors::authorization::ResourceAccessDenied);
 
-    users->createUser({"admin", "OtherAdmin8391", "viewer"});
+    users->createUser({"admin", "OtherAdmin8391-safe", "viewer"});
     EXPECT_EQ(users->deleteAllUsers().deletedCount, 1);
     EXPECT_EQ(users->listUsers().size(), 1U);
     EXPECT_EQ(users->getUser("customAdmin").role, std::string("admin"));
@@ -580,7 +607,7 @@ TEST_CASE("lifecycle: custom bootstrap administrator is protected by user manage
     const tests::ScopedEnvironment noPassword("APP_SEED_ADMIN_PASSWORD", nullptr);
     application::Application restarted(settings);
     restarted.initialize();
-    EXPECT_EQ(restarted.authService()->login("customAdmin", "TestAdmin8391").role, std::string("admin"));
+    EXPECT_EQ(restarted.authService()->login("customAdmin", "TestAdmin8391-safe").role, std::string("admin"));
     restarted.stop();
 }
 

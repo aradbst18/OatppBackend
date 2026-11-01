@@ -101,7 +101,17 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
     {
         if (const auto* applicationError = findNestedException<AppException>(exception))
         {
-            return createErrorResponse(statusFor(applicationError->code()), toString(applicationError->code()));
+            const char* publicText = nullptr;
+            if (applicationError->code() == ErrorCode::ValidationPasswordFormat)
+            {
+                publicText = validation::kPasswordFormatMessage;
+            }
+            else if (applicationError->code() == ErrorCode::ValidationPasswordTooCommon)
+            {
+                publicText = validation::kPasswordTooCommonMessage;
+            }
+            return createErrorResponse(statusFor(applicationError->code()), toString(applicationError->code()), {},
+                                       publicText);
         }
 
         if (const auto* httpError = findNestedException<oatpp::web::protocol::http::HttpError>(exception))
@@ -170,7 +180,7 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
 
 std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler::createErrorResponse(
     const oatpp::web::protocol::http::Status& status, const char* errorName,
-    const oatpp::web::protocol::http::Headers& headers)
+    const oatpp::web::protocol::http::Headers& headers, const char* publicText)
 {
     std::array<unsigned char, 16> bytes{};
     oatpp::utils::random::Random::randomBytes(bytes.data(), bytes.size());
@@ -182,7 +192,8 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
         eventId += hex[byte & 15];
     }
 
-    auto response = createTextError(oatpp::web::protocol::http::Status(status.code, ""), publicMessage(status.code));
+    auto response = createTextError(oatpp::web::protocol::http::Status(status.code, ""),
+                                    publicText ? publicText : publicMessage(status.code));
     // Only forward protocol-required public headers, never diagnostic or body headers.
     for (const char* name : {"WWW-Authenticate", "Allow", "Retry-After"})
     {

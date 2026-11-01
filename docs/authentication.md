@@ -64,31 +64,71 @@ nonempty arguments override the corresponding environment variables.
 
 When the selected account is absent, an unset or empty password aborts startup
 before HTTP routing is created, without inserting an account. Usernames must
-contain 4-18 characters from `[a-zA-Z0-9@#$]`. Passwords must contain 6-48
-characters, including a letter and a digit, with no NUL characters. Use a long,
-randomly generated password within those limits. The published `Admin1234`
-password is rejected even when explicitly supplied. No demo account is created
-automatically in any build.
+contain 4-18 characters from `[a-zA-Z0-9@#$]`. The initial password follows
+the same policy as every new or changed account password below. No demo
+account is created automatically in any build.
 
-On subsequent starts, keep the selected username configured. The password is
+On subsequent starts, keep the selected username configured. A password is
 not required again: bootstrap verifies that the existing account is an
-administrator and preserves its stored password, including later password
-changes. A colliding non-administrator account causes a configuration error;
-bootstrap never promotes it or resets its credentials. The selected account
-is protected against deletion and renaming, including bulk deletion. PUT and
-PATCH also reject demotion of this account with HTTP 403, leaving all account
-fields and sessions unchanged. Password changes that retain its `admin` role
-remain allowed.
+administrator with a stored hash, and preserves its credentials and sessions.
+A colliding non-administrator causes a configuration error; bootstrap never
+promotes accounts or resets credentials. The selected administrator is protected
+against deletion, renaming and demotion, including bulk operations. Password
+changes retaining its `admin` role remain allowed.
 
-For an installation created with the former `Admin1234` password, startup now
-fails while the selected account still uses it. Changing
-`APP_SEED_ADMIN_PASSWORD` does not reset an existing account. Before restarting,
-use a trusted offline maintenance process to replace the stored password hash
-with one produced by `auth::passwordHash()` for a new private password. Audit
-other former bootstrap accounts as well if the configured username has changed.
-Revoke affected refresh tokens and rotate `jwt.secret` to invalidate previously
-issued access tokens. JWT secret rotation alone does not revoke refresh tokens.
-Provisioning neither resets passwords nor invalidates sessions automatically.
+## Password policy
+
+Account creation, batch creation, PUT, PATCH and initial administrator provisioning
+all use the shared password validator:
+
+- Length: **15-128 Unicode code points**, encoded as valid UTF-8.
+- Spaces, Unicode, digits, punctuation and letters are supported; no required
+  mix of character types.
+- Control characters (U+0000-U+001F and U+007F-U+009F) are rejected, including NUL.
+- Entire passwords are compared case-sensitively with a bundled SecLists
+  common-password list. Substrings and individual words are not banned.
+- HTTP 422 responses explain either the length/encoding rule or that the
+  password is too common. Password values are never echoed in errors.
+
+This policy follows the length and blocklist approach in
+[NIST SP 800-63B-4, section 3.1.1](https://pages.nist.gov/800-63-4/sp800-63b.html#passwordver).
+There is no mandatory MFA in this application, so the minimum is 15 characters.
+The 128-character maximum is an application limit, above NIST's recommended
+support for at least 64 characters. Unicode is compared as submitted, without
+normalization, trimming or truncation; visually identical Unicode sequences can
+be different passwords. This is not a claim of complete NIST compliance.
+
+**Existing credentials remain valid.** The new policy is checked only when
+setting a password, never at login or when starting with an existing administrator.
+Login accepts non-empty passwords up to 512 bytes (128 four-byte code points),
+then verifies the complete supplied value against the stored hash. Replacing
+an existing password invalidates its sessions.
+
+### Updating the offline blocklist
+
+The bundled dataset comes from the maintained
+[SecLists repository](https://github.com/danielmiessler/SecLists/blob/master/Passwords/Common-Credentials/xato-net-10-million-passwords-1000000.txt).
+The source is the one-million-entry sample of the Xato password corpus, ranked by
+frequency. The bundled snapshot contains **10,908 distinct entries** that meet our
+15-128 Unicode character rule and contain no control characters. Shorter, longer,
+and control-containing passwords already fail validation and are excluded from
+the bundle. This covers known weak long passwords, not every compromised password
+or every predictable variation. Validation makes no network requests. Refresh the
+snapshot when reviewing password policy or relevant threat information:
+
+```bash
+curl --fail --location \
+  https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/xato-net-10-million-passwords-1000000.txt \
+  -o /tmp/common-passwords.txt
+python3 scripts/update_password_blocklist.py /tmp/common-passwords.txt
+```
+
+The generator filters by the password policy, sorts and deduplicates entries,
+records the source SHA-256 and retained count, and runs small self-checks. Length
+is counted in Unicode code points, not UTF-8 bytes; spaces are preserved. A source
+with no eligible passwords is rejected before writing. Review the generated diff,
+run the validation tests and rebuild before shipping. Keep the adjacent SecLists MIT
+license with the generated file. No password-specific exceptions are added in code.
 
 ## Endpoints
 

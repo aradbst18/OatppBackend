@@ -285,7 +285,7 @@ config::AppSettings testSettings(int port)
 struct TestServer
 {
     tests::ScopedEnvironment adminUsername{"APP_SEED_ADMIN_USERNAME", "admin"};
-    tests::ScopedEnvironment adminPassword{"APP_SEED_ADMIN_PASSWORD", "TestAdmin8391"};
+    tests::ScopedEnvironment adminPassword{"APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe"};
     std::unique_ptr<application::Application> app;
     std::thread thread;
     int port{0};
@@ -377,7 +377,7 @@ std::unique_ptr<TestServer> startServer(const std::string& trustedProxies = {},
 
 std::string loginAndGetToken(const std::string& host, int port)
 {
-    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391-safe"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -412,11 +412,11 @@ TEST_CASE("api: login returns 200 with token")
     EXPECT_TRUE(!token.empty());
 }
 
-TEST_CASE("api: login rejects bad credentials and the published password with 401")
+TEST_CASE("api: login rejects incorrect passwords with 401")
 {
     auto srv = startServer();
 
-    for (const char* password : {"Wrong1234", "Admin1234"})
+    for (const char* password : {"too-short", "WrongPassword8391-safe"})
     {
         const std::string payload = std::string(R"({"username":"admin","password":")") + password + R"("})";
         const std::string req =
@@ -436,7 +436,7 @@ TEST_CASE("api: login with Int8 overflow returns 400")
 {
     auto srv = startServer();
 
-    const std::string payload = R"({"username":"admin","password":"TestAdmin8391","pinCode":64654646})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391-safe","pinCode":64654646})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -530,7 +530,7 @@ TEST_CASE("api: refresh token endpoint roundtrip and rotation with query paramet
     auto srv = startServer();
 
     // 1. Login
-    const std::string loginPayload = R"({"username":"admin","password":"TestAdmin8391"})";
+    const std::string loginPayload = R"({"username":"admin","password":"TestAdmin8391-safe"})";
     const std::string loginReq =
         "POST /auth/login?probe=1 HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(loginPayload.size()) + "\r\nConnection: close\r\n\r\n" + loginPayload;
@@ -619,6 +619,10 @@ TEST_CASE("api: error mapper hides diagnostics for direct and nested application
         {std::make_exception_ptr(errors::filesystem::NotFound(kPrivateDiagnostic)), 404, "FileNotFound"},
         {std::make_exception_ptr(errors::database::Conflict(kPrivateDiagnostic)), 409, "DatabaseConflict"},
         {std::make_exception_ptr(errors::validation::InvalidValue(kPrivateDiagnostic)), 422, "ValidationInvalidValue"},
+        {std::make_exception_ptr(errors::validation::PasswordFormat(kPrivateDiagnostic)), 422,
+         "ValidationPasswordFormat"},
+        {std::make_exception_ptr(errors::validation::PasswordTooCommon(kPrivateDiagnostic)), 422,
+         "ValidationPasswordTooCommon"},
         {std::make_exception_ptr(errors::ratelimit::Exceeded(kPrivateDiagnostic)), 429, "RateLimited"},
     };
 
@@ -873,7 +877,7 @@ TEST_CASE("api: cors attaches headers to responses")
 {
     auto srv = startServer();
 
-    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391-safe"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nOrigin: https://app.example.com\r\nContent-Type: "
         "application/json\r\nContent-Length: " +
@@ -993,7 +997,7 @@ namespace
 
 std::string getAdminToken(int port)
 {
-    const std::string payload = R"({"username":"admin","password":"TestAdmin8391"})";
+    const std::string payload = R"({"username":"admin","password":"TestAdmin8391-safe"})";
     const std::string req =
         "POST /auth/login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: " +
         std::to_string(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload;
@@ -1020,11 +1024,11 @@ struct UserWriteRequest
 std::vector<UserWriteRequest> userManagementWrites(const std::string& username)
 {
     return {
-        {"POST", "/users", R"({"username":"newadmin","password":"Changed1234","role":"admin"})"},
-        {"POST", "/users", R"([{"username":"newbatch","password":"Changed1234","role":"admin"}])"},
-        {"POST", "/users/batch", R"([{"username":"newexplicit","password":"Changed1234","role":"admin"}])"},
-        {"PUT", "/users/" + username, R"({"username":"renameduser","password":"Changed1234","role":"admin"})"},
-        {"PATCH", "/users/" + username, R"({"username":"renameduser","password":"Changed1234","role":"admin"})"},
+        {"POST", "/users", R"({"username":"newadmin","password":"Changed1234-safe","role":"admin"})"},
+        {"POST", "/users", R"([{"username":"newbatch","password":"Changed1234-safe","role":"admin"}])"},
+        {"POST", "/users/batch", R"([{"username":"newexplicit","password":"Changed1234-safe","role":"admin"}])"},
+        {"PUT", "/users/" + username, R"({"username":"renameduser","password":"Changed1234-safe","role":"admin"})"},
+        {"PATCH", "/users/" + username, R"({"username":"renameduser","password":"Changed1234-safe","role":"admin"})"},
         {"DELETE", "/users/" + username, ""},
         {"DELETE", "/users", ""},
     };
@@ -1058,31 +1062,72 @@ std::string tokenWithRole(const std::optional<std::string>& role, const auth::To
 
 }  // namespace
 
-TEST_CASE("api: login preserves NUL passwords after creation and password changes")
+TEST_CASE("api: new password policy covers creation, batches and updates without changing rejected accounts")
+{
+    auto srv = startServer();
+    auto users = srv->app->userService();
+    users->createUser({"policyuser", "a quiet river flows", "viewer"});
+    const auto token = loginAndGetToken("127.0.0.1", srv->port);
+    const auto original =
+        srv->app->database()->execute("SELECT username, password_hash, session_version FROM users ORDER BY username");
+    const auto login = srv->app->authService()->login("policyuser", "a quiet river flows");
+
+    const std::vector<std::string> invalidPasswords = {"too-short", std::string(129, 'x'), "PolniyPizdec0211",
+                                                       R"(a quiet river\u0000flows)"};
+    for (const auto& password : invalidPasswords)
+    {
+        const std::string body =
+            std::string(R"({"username":"policyuser","password":")") + password + R"(","role":"viewer"})";
+        const std::vector<UserWriteRequest> requests = {
+            {"POST", "/users", body},
+            {"POST", "/users", "[" + body + "]"},
+            {"POST", "/users/batch", "[" + body + "]"},
+            {"PUT", "/users/policyuser", body},
+            {"PATCH", "/users/policyuser", body},
+        };
+        for (const auto& request : requests)
+        {
+            const auto response = userManagementRequest(srv->port, request.method, request.path, token, request.body);
+            EXPECT_EQ(statusOf(response), 422);
+            EXPECT_EQ(bodyOf(response),
+                      std::string(password == "PolniyPizdec0211" ? errors::validation::kPasswordTooCommonMessage
+                                                                 : errors::validation::kPasswordFormatMessage));
+            EXPECT_TRUE(srv->app->database()->execute(
+                            "SELECT username, password_hash, session_version FROM users ORDER BY username") ==
+                        original);
+        }
+    }
+    EXPECT_EQ(srv->app->authService()->whoAmI(srv->app->authService()->authenticate(login.accessToken)).username,
+              std::string("policyuser"));
+    EXPECT_FALSE(srv->app->authService()->refresh(login.refreshToken).accessToken.empty());
+}
+
+TEST_CASE("api: Unicode passwords round-trip through creation, password changes and login")
 {
     auto srv = startServer();
     const auto token = loginAndGetToken("127.0.0.1", srv->port);
-
+    std::string password = u8"عبارت عبور خصوصی و بلند";
     for (const std::string method : {"POST", "PUT", "PATCH"})
     {
-        const std::string password = "Valid123\\u0000" + method;
-        const std::string body = "{\"username\":\"nuluser\",\"password\":\"" + password + "\",\"role\":\"viewer\"}";
-        EXPECT_EQ(statusOf(userManagementRequest(srv->port, method, method == "POST" ? "/users" : "/users/nuluser",
+        password += u8"🌊";
+        const std::string body = "{\"username\":\"unicodeuser\",\"password\":\"" + password + "\",\"role\":\"viewer\"}";
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, method, method == "POST" ? "/users" : "/users/unicodeuser",
                                                  token, body)),
                   method == "POST" ? 201 : 200);
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "POST", "/auth/login", "", body)), 200);
+    }
+}
 
-        const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", body);
-        EXPECT_EQ(statusOf(response), 200);
-        EXPECT_TRUE(bodyOf(response).find("access_token") != std::string::npos);
-
-        for (const char* wrongPassword : {"Valid123", R"(Valid123\u0000wrong)"})
-        {
-            const std::string wrongBody =
-                std::string(R"({"username":"nuluser","password":")") + wrongPassword + R"("})";
-            const auto rejected = userManagementRequest(srv->port, "POST", "/auth/login", "", wrongBody);
-            EXPECT_EQ(statusOf(rejected), 401);
-            EXPECT_EQ(bodyOf(rejected).find("access_token"), std::string::npos);
-        }
+TEST_CASE("api: login preserves existing NUL passwords and never authenticates their prefixes")
+{
+    auto srv = startServer();
+    repositories::UserRepository users(srv->app->database());
+    tests::seedUser(users, "nuluser", "viewer", std::string("Valid123\0legacy", 15));
+    for (const char* password : {"Valid123", R"(Valid123\u0000wrong)", R"(Valid123\u0000legacy)"})
+    {
+        const std::string body = std::string(R"({"username":"nuluser","password":")") + password + R"("})";
+        EXPECT_EQ(statusOf(userManagementRequest(srv->port, "POST", "/auth/login", "", body)),
+                  std::string(password) == R"(Valid123\u0000legacy)" ? 200 : 401);
     }
 }
 
@@ -1092,19 +1137,19 @@ TEST_CASE("api: login rejects NUL suffixes instead of authenticating their prefi
 
     for (const char* username : {R"(admin\u0000suffix)", R"(admin\u0000)"})
     {
-        const std::string body = std::string(R"({"username":")") + username + R"(","password":"TestAdmin8391"})";
+        const std::string body = std::string(R"({"username":")") + username + R"(","password":"TestAdmin8391-safe"})";
         const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", body);
         EXPECT_EQ(statusOf(response), 422);
         EXPECT_EQ(bodyOf(response).find("access_token"), std::string::npos);
     }
 
-    const auto wrongPassword = userManagementRequest(srv->port, "POST", "/auth/login", "",
-                                                     R"({"username":"admin","password":"TestAdmin8391\u0000suffix"})");
+    const auto wrongPassword = userManagementRequest(
+        srv->port, "POST", "/auth/login", "", R"({"username":"admin","password":"TestAdmin8391-safe\u0000suffix"})");
     EXPECT_EQ(statusOf(wrongPassword), 401);
     EXPECT_EQ(bodyOf(wrongPassword).find("access_token"), std::string::npos);
 
     const std::string oversized =
-        std::string(R"({"username":"admin","password":"TestAdmin8391\u0000)") + std::string(48, 'x') + R"("})";
+        std::string(R"({"username":"admin","password":"TestAdmin8391-safe\u0000)") + std::string(513, 'x') + R"("})";
     const auto response = userManagementRequest(srv->port, "POST", "/auth/login", "", oversized);
     EXPECT_EQ(statusOf(response), 422);
     EXPECT_EQ(bodyOf(response).find("access_token"), std::string::npos);
@@ -1115,13 +1160,13 @@ TEST_CASE("api: users allow viewer and operator reads but reject every write wit
     auto srv = startServer();
     auto service = srv->app->userService();
     auto database = srv->app->database();
-    service->createUser({"targetuser", "Original1234", "viewer"});
+    service->createUser({"targetuser", "Original1234-safe", "viewer"});
 
     for (const std::string role : {"viewer", "operator"})
     {
         const std::string username = role + "user";
-        service->createUser({username, "Original1234", role});
-        const auto token = srv->app->authService()->login(username, "Original1234").accessToken;
+        service->createUser({username, "Original1234-safe", role});
+        const auto token = srv->app->authService()->login(username, "Original1234-safe").accessToken;
         const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
 
         EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", token)), 200);
@@ -1144,11 +1189,11 @@ TEST_CASE("api: users allow viewer and operator reads but reject every write wit
         for (const auto& target : {std::string("admin"), username})
         {
             EXPECT_EQ(statusOf(userManagementRequest(srv->port, "PATCH", "/users/" + target, token,
-                                                     R"({"password":"Changed1234"})")),
+                                                     R"({"password":"Changed1234-safe"})")),
                       403);
             EXPECT_EQ(statusOf(userManagementRequest(srv->port, "PUT", "/users/" + target, token,
                                                      "{\"username\":\"" + target +
-                                                         "\",\"password\":\"Changed1234\",\"role\":\"admin\"}")),
+                                                         "\",\"password\":\"Changed1234-safe\",\"role\":\"admin\"}")),
                       403);
             EXPECT_TRUE(database->execute("SELECT username, password_hash, role FROM users ORDER BY username") ==
                         original);
@@ -1210,7 +1255,7 @@ TEST_CASE("api: users controller enforces roles when the authentication intercep
     auto database = srv->app->database();
     const auto original = database->execute("SELECT username, password_hash, role FROM users ORDER BY username");
     auto patch = dto::PatchUserDto::createShared();
-    patch->password = "Changed1234";
+    patch->password = "Changed1234-safe";
 
     const std::vector<std::optional<std::string>> roles = {"viewer", "operator", std::nullopt, "", "superuser"};
     for (const auto& role : roles)
@@ -1239,7 +1284,7 @@ TEST_CASE("api: users controller enforces roles when the authentication intercep
     const auto request =
         controllers::UserController::IncomingRequest::createShared(nullptr, {}, headers, nullptr, nullptr);
     EXPECT_EQ(controller.patchUser("admin", patch, request)->getStatus().code, 200);
-    EXPECT_FALSE(srv->app->authService()->login("admin", "Changed1234").accessToken.empty());
+    EXPECT_FALSE(srv->app->authService()->login("admin", "Changed1234-safe").accessToken.empty());
 }
 
 TEST_CASE("api: invalidated sessions fail in middleware and controller fallback paths")
@@ -1247,8 +1292,8 @@ TEST_CASE("api: invalidated sessions fail in middleware and controller fallback 
     auto srv = startServer();
     const auto users = srv->app->userService();
     const auto authService = srv->app->authService();
-    users->createUser({"alice", "AlicePass123", "admin"});
-    const auto login = authService->login("alice", "AlicePass123");
+    users->createUser({"alice", "AlicePass123-safe", "admin"});
+    const auto login = authService->login("alice", "AlicePass123-safe");
     const auto mapper = serialization::createAppObjectMapper();
     controllers::UserController userController(mapper, users, authService);
     controllers::AuthController authController(mapper, authService, srv->app->jwtService());
@@ -1260,7 +1305,7 @@ TEST_CASE("api: invalidated sessions fail in middleware and controller fallback 
     EXPECT_EQ(authController.whoAmI(request)->getStatus().code, 200);
 
     services::PatchUserInput patch;
-    patch.password = "ChangedPass456";
+    patch.password = "ChangedPass456-safe";
     users->patchUser("alice", patch);
     EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/users", login.accessToken)), 401);
     EXPECT_EQ(statusOf(userManagementRequest(srv->port, "GET", "/auth/who-am-i", login.accessToken)), 401);
@@ -1321,7 +1366,7 @@ TEST_CASE("api: users add - single user and batch list")
     EXPECT_FALSE(token.empty());
 
     // Act - add single user
-    const std::string singlePayload = R"({"username":"alice","password":"AlicePassword1","role":"operator"})";
+    const std::string singlePayload = R"({"username":"alice","password":"AlicePassword1-safe","role":"operator"})";
     const std::string singleReq =
         "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(singlePayload.size()) +
@@ -1348,7 +1393,7 @@ TEST_CASE("api: users add - single user and batch list")
 
     // Act - add multiple users as array to POST /users
     const std::string batchPayload =
-        R"([{"username":"bob1","password":"BobPassword1","role":"viewer"},{"username":"bob2","password":"BobPassword2","role":"operator"}])";
+        R"([{"username":"bob1","password":"BobPassword1-safe","role":"viewer"},{"username":"bob2","password":"BobPassword2-safe","role":"operator"}])";
     const std::string batchReq =
         "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(batchPayload.size()) +
@@ -1361,7 +1406,7 @@ TEST_CASE("api: users add - single user and batch list")
     EXPECT_TRUE(bodyOf(batchResp).find("\"username\":\"bob2\"") != std::string::npos);
 
     // Act - explicit batch endpoint POST /users/batch
-    const std::string explicitPayload = R"([{"username":"bob3","password":"BobPassword3","role":"viewer"}])";
+    const std::string explicitPayload = R"([{"username":"bob3","password":"BobPassword3-safe","role":"viewer"}])";
     const std::string explicitReq =
         "POST /users/batch HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(explicitPayload.size()) +
@@ -1384,7 +1429,7 @@ TEST_CASE("api: failed user batches leave no accounts through either endpoint")
     const std::string token = getAdminToken(srv->port);
     EXPECT_FALSE(token.empty());
     const std::string payload =
-        R"([{"username":"batchnew","password":"BatchPassword1","role":"viewer"},{"username":"admin","password":"OtherPassword1","role":"operator"}])";
+        R"([{"username":"batchnew","password":"BatchPassword1-safe","role":"viewer"},{"username":"admin","password":"OtherPassword1-safe","role":"operator"}])";
     for (const std::string path : {"/users", "/users/batch"})
     {
         const std::string request =
@@ -1471,7 +1516,8 @@ TEST_CASE("api: users update - full update and patch")
     EXPECT_EQ(statusOf(httpRoundTrip("127.0.0.1", srv->port, getNewReq)), 200);
 
     // Act - PUT attempting to rename default admin is blocked with 403 Forbidden
-    const std::string putAdminRenamePayload = R"({"username":"superadmin","password":"AdminPassword1","role":"admin"})";
+    const std::string putAdminRenamePayload =
+        R"({"username":"superadmin","password":"AdminPassword1-safe","role":"admin"})";
     const std::string putAdminRenameReq =
         "PUT /users/admin HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(putAdminRenamePayload.size()) +
@@ -1532,7 +1578,8 @@ TEST_CASE("api: users update - full update and patch")
     EXPECT_EQ(statusOf(emptyPatchResp), 400);
 
     // Act - Updating non-existent user returns 404
-    const std::string nonExistentPutPayload = R"({"username":"nonexistent","password":"Password123","role":"viewer"})";
+    const std::string nonExistentPutPayload =
+        R"({"username":"nonexistent","password":"Password123-safe","role":"viewer"})";
     const std::string nonExistentPutReq =
         "PUT /users/nonexistent HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(nonExistentPutPayload.size()) +
@@ -1549,7 +1596,7 @@ TEST_CASE("api: users delete - single and all users with admin protection")
     EXPECT_FALSE(token.empty());
 
     // Create user dave
-    const std::string createPayload = R"({"username":"dave","password":"DavePassword1","role":"viewer"})";
+    const std::string createPayload = R"({"username":"dave","password":"DavePassword1-safe","role":"viewer"})";
     const std::string createReq =
         "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(createPayload.size()) +
@@ -1586,7 +1633,7 @@ TEST_CASE("api: users delete - single and all users with admin protection")
     EXPECT_EQ(statusOf(getAdminResp), 200);
 
     // Act - Create another user then delete all users
-    const std::string createEvelynPayload = R"({"username":"evelyn","password":"EvePassword1","role":"operator"})";
+    const std::string createEvelynPayload = R"({"username":"evelyn","password":"EvePassword1-safe","role":"operator"})";
     const std::string createEvelynReq =
         "POST /users HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + token +
         "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(createEvelynPayload.size()) +

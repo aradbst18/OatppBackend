@@ -46,8 +46,8 @@ public:
     /// Ensure the bootstrap administrator exists and return its effective username.
     /// Nonempty arguments override APP_SEED_ADMIN_USERNAME / APP_SEED_ADMIN_PASSWORD.
     /// Only the username defaults to "admin"; creation requires a private password.
-    /// Existing accounts must be administrators and must not use the published
-    /// sample password. Their credentials are never overwritten by bootstrap.
+    /// Existing accounts must be administrators with stored password hashes.
+    /// Their credentials are never overwritten by bootstrap.
     std::string ensureSeeded(const std::string& username = "", const std::string& password = "");
 
     /// Validate credentials and issue a JWT (+ refresh token if configured).

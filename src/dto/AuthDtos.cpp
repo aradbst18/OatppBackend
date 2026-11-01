@@ -29,16 +29,15 @@ Example: `admin01`)";
 void LoginRequestDto::Z__PROPERTY_ADD_INFO_password(oatpp::data::mapping::type::BaseObject::Property::Info* info)
 {
     info->required = true;
-    info->pattern = "^.{6,48}$";
     info->description =
         R"(**Account password.**
 
 **Validation Rules:**
-- Length: strictly bounded between 6 and 48 characters.
-- Must contain at least one letter and one digit.
+- Non-empty, at most 512 UTF-8 bytes.
+- Existing credentials remain valid; the new-password strength policy is not applied at login.
 - Sent as JSON, then verified against the stored password hash on the backend.
 
-Example: `Alice1234`)";
+Example: `a quiet river flows`)";
 }
 
 void LoginRequestDto::Z__PROPERTY_ADD_INFO_pinCode(oatpp::data::mapping::type::BaseObject::Property::Info* info)

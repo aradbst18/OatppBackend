@@ -4,7 +4,7 @@
         {
             "id": "seedAdminPassword",
             "type": "promptString",
-            "description": "Initial admin password: 6-48 characters, including a letter and a digit; leave blank if already created. Admin1234 is not allowed.",
+            "description": "Initial admin password: 15-128 Unicode characters, no controls or common passwords; leave blank if already created.",
             "password": true
         }
     ],

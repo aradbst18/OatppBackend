@@ -112,9 +112,9 @@ verified for schema + the selected bootstrap administrator
 (`AuthService::ensureSeeded`). Creating that account requires an explicit
 `APP_SEED_ADMIN_PASSWORD`; only the username defaults to `admin`.
 `APP_SEED_ADMIN_USERNAME` selects another username and must stay configured on
-later starts. Existing administrator passwords are preserved; the published
-sample password aborts startup. See [administrator provisioning](authentication.md#administrator-provisioning)
-for credential validation and migration. This policy applies to both backends.
+later starts. Existing administrator passwords are preserved.
+See [administrator provisioning](authentication.md#administrator-provisioning)
+for credential validation and password policy. This policy applies to both backends.
 With user-database encryption on,
 the file is SQLCipher-encrypted via `database.key` (a missing key is
 rejected; an explicitly empty key opens the file plaintext

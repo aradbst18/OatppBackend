@@ -43,7 +43,7 @@ public:
 private:
     std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> createErrorResponse(
         const oatpp::web::protocol::http::Status& status, const char* errorName,
-        const oatpp::web::protocol::http::Headers& headers = {});
+        const oatpp::web::protocol::http::Headers& headers = {}, const char* publicText = nullptr);
 };
 
 /// Map a domain ErrorCode to its HTTP Status (shared by handler + controllers).

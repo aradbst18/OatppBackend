@@ -56,7 +56,7 @@ curl -s http://localhost:8080/auth/login \
 ## Request rules
 
 - `username`: **4-18** chars, charset `[a-zA-Z0-9@#$]`, case-sensitive.
-- `password`: **6-48** chars, must contain **at least one letter and one digit**.
+- `password`: non-empty, at most **512 bytes**. Existing passwords remain valid; the new-password policy is not applied at login.
 - `pinCode` (optional): demo `Int8` field (`-128..127`). Out-of-range values never reach the controller — deserialization fails first with `400`. Omit it unless you are testing integer range validation.
 - Use the credentials supplied by your administrator. There is no default login password.
 
@@ -64,7 +64,7 @@ curl -s http://localhost:8080/auth/login \
 
 Success (`200`) is JSON (`LoginResponseDto`). Failures are `HTTP Status + text/plain message`
 via oatpp's `createResponse` / `AppErrorHandler` — no numeric envelope. The status line
-carries the machine-readable part, the body the human-readable `what()` (safe to show
+carries the machine-readable part, the body an approved fixed message (safe to show
 in the UI, never contains secrets or hashes). Domain exceptions thrown are
 `app::errors::{request,authentication,validation,runtime,...}` mapped to status:
 
@@ -73,7 +73,7 @@ in the UI, never contains secrets or hashes). Domain exceptions thrown are
 | 200 | — | Credentials valid; token issued. | Store token, navigate to app. |
 | 400 | `request::Missing`, `serialization::ParsingFailed` | Missing `username`/`password`, malformed JSON, or `pinCode` out of range. | Fix the request shape; highlight the offending field. |
 | 401 | `authentication::InvalidCredentials` | Shape was valid but credentials are wrong (unknown user and wrong password look identical on purpose). | Show "Invalid username or password". |
-| 422 | `validation::InvalidValue` | `username`/`password` fail the shape rules above (too short/long, illegal chars, password without letter+digit). | Show field-level validation before retrying. |
+| 422 | `validation::InvalidValue` | `username` fails its shape rules, or `password` is empty or exceeds 512 bytes. | Show field-level validation before retrying. |
 | 500 | `runtime::ExecutionFailed`, `internal::OperationFailed` | Unexpected server failure (never leaks internals). | Retry later / report. |
 
 Note the deliberate `422` vs `401` split: `422` means "fix the input shape", `401` means "shape was fine, credentials are wrong". The `401` body is constant-shape so callers cannot enumerate users.)DOC";
@@ -124,9 +124,9 @@ Note the deliberate `422` vs `401` split: `422` means "fix the input shape", `40
     info->addResponse<String>(Status::CODE_422, "text/plain",
                               "Validation failed — `validation::InvalidValue`: `username`/`password` violate the "
                               "shape "
-                              "rules (length, charset, letter+digit requirement). Validate in the UI before sending.")
+                              "rules (username charset/length, or empty/oversized login password).")
         .addExample("Illegal username shape", oatpp::String("Invalid username: 4-18 chars of [a-zA-Z0-9@#$]"))
-        .addExample("Weak password shape", oatpp::String("Invalid password: 6-48 chars with a letter and a digit"));
+        .addExample("Invalid login input", oatpp::String("Invalid request data"));
 
     info->addResponse<String>(Status::CODE_500, "text/plain",
                               "Internal error — `runtime::ExecutionFailed` / `internal::OperationFailed`: unexpected "

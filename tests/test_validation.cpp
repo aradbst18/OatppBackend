@@ -54,12 +54,59 @@ TEST_CASE("validation: username rules")
 
 TEST_CASE("validation: password rules")
 {
-    EXPECT_TRUE(validation::isValidPassword("Admin1234"));
-
-    EXPECT_FALSE(validation::isValidPassword("short"));     // no digit + short
-    EXPECT_FALSE(validation::isValidPassword("12345678"));  // no letter
-    EXPECT_FALSE(validation::isValidPassword("a1"));        // too short
+    EXPECT_TRUE(validation::isValidPassword("a quiet river flows"));
+    EXPECT_TRUE(validation::isValidPassword("907326418502763"));
+    EXPECT_TRUE(validation::isValidPassword(" spaces stay here "));
+    EXPECT_TRUE(validation::isValidPassword(std::string(128, 'z')));
+    EXPECT_TRUE(validation::isValidPassword("!@#$%^&*()_+=[]"));
+    EXPECT_FALSE(validation::isValidPassword(std::string(14, 'z')));
+    EXPECT_FALSE(validation::isValidPassword(std::string(129, 'z')));
+    EXPECT_FALSE(validation::isValidPassword("too-short"));
+    EXPECT_FALSE(validation::isValidPassword("short"));
     EXPECT_FALSE(validation::isValidPassword(""));
+}
+
+TEST_CASE("validation: passwords count UTF-8 code points and reject malformed encodings and controls")
+{
+    std::string password;
+    for (int i = 0; i < 14; ++i)
+    {
+        password += u8"🌊";
+    }
+    EXPECT_FALSE(validation::isValidPassword(password));
+    password += u8"🌊";
+    EXPECT_TRUE(validation::isValidPassword(password));
+    for (int i = 15; i < 128; ++i)
+    {
+        password += u8"🌊";
+    }
+    EXPECT_TRUE(validation::isValidPassword(password));
+    EXPECT_FALSE(validation::isValidPassword(password + u8"🌊"));
+    EXPECT_TRUE(validation::isValidPassword(u8"یک عبارت عبور بلند و خصوصی"));
+    EXPECT_TRUE(validation::isValidPassword(u8"日本語の十分に長い秘密のパスフレーズ"));
+
+    for (const std::string& suffix :
+         {std::string(1, '\0'), std::string("\n"), std::string("\x7f"), std::string("\xc2\x85"), std::string("\x80"),
+          std::string("\xc0\xaf"), std::string("\xe0\x80\xaf"), std::string("\xed\xa0\x80"),
+          std::string("\xf4\x90\x80\x80"), std::string("\xe2\x82"), std::string("\xe2xy"), std::string("\xff")})
+    {
+        EXPECT_FALSE(validation::isValidPassword("a quiet river flows" + suffix));
+        EXPECT_THROW_AS(validation::validatePassword("a quiet river flows" + suffix),
+                        errors::validation::PasswordFormat);
+    }
+}
+
+TEST_CASE("validation: common-password screening matches whole passwords")
+{
+    for (const char* password : {"Mailcreated5240", "PolniyPizdec0211", "123456789012345", "1234567890123456",
+                                 "qwertyuiopasdfgh", "passwordpassword"})
+    {
+        EXPECT_FALSE(validation::isValidPassword(password));
+        EXPECT_THROW_AS(validation::validatePassword(password), errors::validation::PasswordTooCommon);
+    }
+    EXPECT_TRUE(validation::isValidPassword("a quiet river flows around password123"));
+    EXPECT_TRUE(validation::isValidPassword("a quiet river flows around passwordpassword"));
+    EXPECT_THROW_AS(validation::validatePassword(std::string(129, 'z')), errors::validation::PasswordFormat);
 }
 
 TEST_CASE("validation: required fields")
@@ -93,14 +140,14 @@ TEST_CASE("validation: UserUpsertDto validate succeeds and rejects")
     // Valid DTO succeeds
     auto valid = dto::UserUpsertDto::createShared();
     valid->username = oatpp::String("alice");
-    valid->password = oatpp::String("Alice1234");
+    valid->password = oatpp::String("Alice1234-private");
     valid->role = oatpp::String("operator");
     valid->validate();
     EXPECT_TRUE(valid->username != nullptr);
 
     // Missing username
     auto missingUsername = dto::UserUpsertDto::createShared();
-    missingUsername->password = oatpp::String("Alice1234");
+    missingUsername->password = oatpp::String("Alice1234-private");
     missingUsername->role = oatpp::String("operator");
     EXPECT_THROW_AS(missingUsername->validate(), errors::request::Missing);
 
@@ -113,27 +160,27 @@ TEST_CASE("validation: UserUpsertDto validate succeeds and rejects")
     // Missing role
     auto missingRole = dto::UserUpsertDto::createShared();
     missingRole->username = oatpp::String("alice");
-    missingRole->password = oatpp::String("Alice1234");
+    missingRole->password = oatpp::String("Alice1234-private");
     EXPECT_THROW_AS(missingRole->validate(), errors::request::Missing);
 
     // Invalid username format
     auto invalidUsername = dto::UserUpsertDto::createShared();
     invalidUsername->username = oatpp::String("ab");
-    invalidUsername->password = oatpp::String("Alice1234");
+    invalidUsername->password = oatpp::String("Alice1234-private");
     invalidUsername->role = oatpp::String("operator");
     EXPECT_THROW_AS(invalidUsername->validate(), errors::validation::InvalidValue);
 
-    // Invalid password complexity
+    // Invalid password length
     auto invalidPassword = dto::UserUpsertDto::createShared();
     invalidPassword->username = oatpp::String("alice");
     invalidPassword->password = oatpp::String("short");
     invalidPassword->role = oatpp::String("operator");
-    EXPECT_THROW_AS(invalidPassword->validate(), errors::validation::InvalidValue);
+    EXPECT_THROW_AS(invalidPassword->validate(), errors::validation::PasswordFormat);
 
     // Invalid role
     auto invalidRole = dto::UserUpsertDto::createShared();
     invalidRole->username = oatpp::String("alice");
-    invalidRole->password = oatpp::String("Alice1234");
+    invalidRole->password = oatpp::String("Alice1234-private");
     invalidRole->role = oatpp::String("superuser");
     EXPECT_THROW_AS(invalidRole->validate(), errors::validation::InvalidValue);
 }
@@ -146,7 +193,7 @@ TEST_CASE("validation: PatchUserDto validate partial rules")
 
     // Password only succeeds
     auto passOnly = dto::PatchUserDto::createShared();
-    passOnly->password = oatpp::String("NewPass123");
+    passOnly->password = oatpp::String("NewPass123-safe");
     passOnly->validate();
     EXPECT_TRUE(passOnly->password != nullptr);
 
@@ -165,7 +212,7 @@ TEST_CASE("validation: PatchUserDto validate partial rules")
     // Invalid field format still rejected
     auto badPass = dto::PatchUserDto::createShared();
     badPass->password = oatpp::String("12345");
-    EXPECT_THROW_AS(badPass->validate(), errors::validation::InvalidValue);
+    EXPECT_THROW_AS(badPass->validate(), errors::validation::PasswordFormat);
 
     auto badRole = dto::PatchUserDto::createShared();
     badRole->role = oatpp::String("invalid");
