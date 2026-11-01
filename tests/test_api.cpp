@@ -1068,8 +1068,8 @@ TEST_CASE("api: new password policy covers creation, batches and updates without
     auto users = srv->app->userService();
     users->createUser({"policyuser", "a quiet river flows", "viewer"});
     const auto token = loginAndGetToken("127.0.0.1", srv->port);
-    const auto original =
-        srv->app->database()->execute("SELECT username, password_hash, session_version FROM users ORDER BY username");
+    const auto original = srv->app->database()->execute(
+        "SELECT username, password_hash, CAST(session_version AS TEXT) FROM users ORDER BY username");
     const auto login = srv->app->authService()->login("policyuser", "a quiet river flows");
 
     const std::vector<std::string> invalidPasswords = {"too-short", std::string(129, 'x'), "PolniyPizdec0211",
@@ -1092,9 +1092,10 @@ TEST_CASE("api: new password policy covers creation, batches and updates without
             EXPECT_EQ(bodyOf(response),
                       std::string(password == "PolniyPizdec0211" ? errors::validation::kPasswordTooCommonMessage
                                                                  : errors::validation::kPasswordFormatMessage));
-            EXPECT_TRUE(srv->app->database()->execute(
-                            "SELECT username, password_hash, session_version FROM users ORDER BY username") ==
-                        original);
+            EXPECT_TRUE(
+                srv->app->database()->execute(
+                    "SELECT username, password_hash, CAST(session_version AS TEXT) FROM users ORDER BY username") ==
+                original);
         }
     }
     EXPECT_EQ(srv->app->authService()->whoAmI(srv->app->authService()->authenticate(login.accessToken)).username,
