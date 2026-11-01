@@ -54,7 +54,7 @@ PostgresqlDatabase::PostgresqlDatabase(std::string path, std::uint16_t port, std
       connectTimeoutSec_(connectTimeoutSec)
 {
     // libpq treats host= as a socket directory only when it is absolute
-    // (starts with '/'); relative config values like "data/postgresql" are
+    // (starts with '/'); relative config values like "_data/postgresql" are
     // resolved here so socket connections work regardless of CWD. TCP
     // hosts (no slash) pass through untouched.
     if (path_.find('/') != std::string::npos)

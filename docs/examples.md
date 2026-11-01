@@ -85,7 +85,7 @@ print(data[2:])  # b'Server echo: hello'
 
 ## Configuration
 
-The runtime file is `configs/app.conf` in the active format's syntax (JSON
+The runtime file is `_configs/app.<format>` in the active format's syntax (JSON
 shown here). Samples for every format live in
 `configs/app.{json,toml,xml,yaml}`; a missing file is created from defaults
 on startup.
@@ -93,9 +93,9 @@ on startup.
 ```json
 {
   "server": {"host": "127.0.0.1", "port": 8080},
-  "database": {"path": "data/app.db"},
+  "database": {"path": "_data/app.db"},
   "jwt": {"secret": "change-me-in-production", "issuer": "oatpp-backend", "ttlSeconds": 3600},
-  "logging": {"level": "INFO", "path": "logs"}
+  "logging": {"level": "INFO", "path": "_logs"}
 }
 ```
 

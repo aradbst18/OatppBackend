@@ -55,7 +55,7 @@ class DatabaseExecutor;
  * memory, never logged, and has no accessor by design.
  *
  * Unified naming: `path` is the Unix socket directory (e.g.
- * "data/postgresql", passed to libpq as host=) or a TCP host when the
+ * "_data/postgresql", passed to libpq as host=) or a TCP host when the
  * server listens on TCP; `key` is the scram-sha-256 role password.
  */
 class PostgresqlDatabase : public IDatabase

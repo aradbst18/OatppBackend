@@ -22,6 +22,7 @@
 #include "app/infrastructure/documents/YamlDocument.hpp"
 #endif  // APP_WITH_YAML_PARSER
 
+#include "app/config/RuntimeFilePath.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/infrastructure/TextFile.hpp"
 #include "app/infrastructure/documents/DocumentValue.hpp"
@@ -118,13 +119,23 @@ std::string readField(const infrastructure::documents::DocumentValue& group, con
 
 }  // namespace
 
-std::string defaultVersionFilePath()
+std::string defaultVersionFilePath(const std::string& directory)
 {
-    return "configs/version.conf";
+    const std::string dir = directory.empty() ? "_configs" : directory;
+#if defined(APP_VERSION_FILE_JSON)
+    return defaultRuntimeFilePath("version", "json", dir);
+#elif defined(APP_VERSION_FILE_TOML)
+    return defaultRuntimeFilePath("version", "toml", dir);
+#elif defined(APP_VERSION_FILE_XML)
+    return defaultRuntimeFilePath("version", "xml", dir);
+#elif defined(APP_VERSION_FILE_YAML)
+    return defaultRuntimeFilePath("version", "yaml", dir);
+#endif  // APP_VERSION_FILE format selection (JSON / TOML / XML / YAML)
 }
 
-void writeVersionFile(const std::string& path, const VersionInfo& info)
+void writeVersionFile(const std::string& requestedPath, const VersionInfo& info)
 {
+    const std::string path = resolveRuntimeFilePath(requestedPath);
 #if defined(APP_VERSION_FILE_JSON)
 #ifndef APP_WITH_JSON_PARSER
 #error "APP_VERSION_FILE_FORMAT=JSON requires the JSON parser (APP_ENABLE_JSON_PARSER=ON)"
@@ -176,8 +187,9 @@ void writeVersionFile(const std::string& path, const VersionInfo& info)
 #endif  // APP_VERSION_FILE format selection (JSON / TOML / XML / YAML)
 }
 
-VersionInfo readVersionFile(const std::string& path, std::vector<std::string>* missing)
+VersionInfo readVersionFile(const std::string& requestedPath, std::vector<std::string>* missing)
 {
+    const std::string path = resolveRuntimeFilePath(requestedPath);
     const VersionInfo current = currentVersionInfo();
 
 #if defined(APP_VERSION_FILE_JSON)
@@ -253,8 +265,9 @@ VersionInfo readVersionFile(const std::string& path, std::vector<std::string>* m
     }
 }
 
-std::vector<std::string> ensureVersionFile(const std::string& path)
+std::vector<std::string> ensureVersionFile(const std::string& requestedPath)
 {
+    const std::string path = resolveRuntimeFilePath(requestedPath);
     if (!infrastructure::fileExists(path))
     {
         writeVersionFile(path, currentVersionInfo());

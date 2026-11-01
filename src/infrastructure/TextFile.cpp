@@ -234,6 +234,12 @@ fs::path privateParentDirectory(const std::string& path)
 
 std::string readTextFile(const std::string& path)
 {
+    std::error_code ec;
+    if (fs::is_directory(path, ec) && !ec)
+    {
+        throw errors::filesystem::NotFound("Cannot open directory as file: " + path);
+    }
+
     std::ifstream in(path, std::ios::binary);
     if (!in)
     {
@@ -283,6 +289,12 @@ void syncParentDirectories(const std::string& path)
 
 void writePrivateTextFile(const std::string& path, const std::string& content, bool overwrite)
 {
+    std::error_code ec;
+    if (fs::is_directory(path, ec) && !ec)
+    {
+        throw errors::filesystem::WriteFailed("Target path is a directory: " + path);
+    }
+
     privateParentDirectory(path);
     const std::string pattern = path + ".tmp.XXXXXX";
     std::vector<char> temporary(pattern.begin(), pattern.end());

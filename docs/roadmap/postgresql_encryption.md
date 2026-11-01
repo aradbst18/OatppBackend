@@ -15,7 +15,7 @@ missing pieces (TLS in transit, at-rest TDE), including the challenges.
 | PostgreSQL at-rest encryption (TDE) | ❌ not implemented (see §5) |
 
 Consequence: with `APP_USERS_DATABASE_TYPE=POSTGRESQL`, traffic over TCP
-(`127.0.0.1:<port>`) and all files under `data/postgresql/pgdata` are
+(`127.0.0.1:<port>`) and all files under `_data/postgresql/pgdata` are
 unencrypted. Passwords never cross the wire in cleartext (scram), and the
 Unix socket is filesystem-permission protected — for a localhost-only
 single-user server that is the effective security boundary today.
@@ -141,7 +141,7 @@ and the `openssl` CLI is available, so no new system packages are needed.
   would need to drive Percona packaging, `shared_preload_libraries`, and
   per-database `CREATE EXTENSION` + key setup.
 - The realistic near-term at-rest story remains **disk-level encryption**
-  (LUKS) on the host holding `data/`, which is outside the application's
+  (LUKS) on the host holding `_data/`, which is outside the application's
   scope to configure (documented here so the gap is explicit, not hidden).
 
 ## 6. Operational notes

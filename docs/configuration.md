@@ -13,15 +13,34 @@ Four formats, one active at compile time:
 
 Exactly one format define is set (see `cmake/options.cmake`; invalid values
 fail at configure time). `createActiveStore()` / `activeFormatName()` /
-`defaultConfigPath()` resolve without runtime branching.
+`defaultConfigPath()` select the build format and resolve existing runtime filenames.
 
-The runtime file is always `configs/app.conf`, whatever the format — only the
-on-disk syntax follows the active format. `configs/app.{json,toml,xml,yaml}`
-are checked-in samples; the app itself reads/writes `app.conf`, creating it
-from non-secret defaults and unique random secrets on first startup when missing
-(see below). Generated and saved configurations have owner-only (`0600`)
-permissions. A missing explicit
-`--config <path>` is created the same way.
+Runtime files live in `_configs/`: `app.json`, `app.toml`, `app.xml`, or
+`app.yaml`, according to `APP_CONFIG_FORMAT`. Version files independently use
+`APP_VERSION_FILE_FORMAT` (`version.json`, `version.toml`, `version.xml`, or
+`version.yaml`). Existing matching files are used; absent files are created.
+
+Only the filenames of these two files are case-insensitive. For example,
+`APP.JSON` and `app.json` match; directory names and unrelated filenames retain
+normal filesystem behavior. Multiple case variants of the same filename cause
+an error instead of choosing potentially different secrets. The selected extension
+wins over a legacy `.conf` file; if no selected-format file exists, an existing
+case-insensitive `app.conf` or `version.conf` is reused with the build-selected
+syntax. Files for other formats are ignored. An explicit `--config <path>`
+keeps its supplied extension and also recognizes case variants of `app` filenames.
+When `--config <path>` specifies a parent directory, the version file is colocated
+in that directory by default; `--version-file <path>` allows setting an explicit
+version file path independently.
+
+Keep `configs/app.{json,toml,xml,yaml}` as checked-in format examples. They contain
+rejected placeholders, are not loaded automatically, and must not contain real
+credentials. `_configs/`, `_data/`, and `_logs/` are runtime output and git-ignored.
+Relative defaults are resolved from the working directory.
+
+
+Missing application files are created from non-secret defaults and unique random
+secrets. Generated configurations have owner-only (`0600`) permissions. A missing
+explicit `--config <path>` is created the same way.
 
 Each parser is independently toggleable (`APP_ENABLE_*_PARSER`, all `ON` by
 default, set once in the `base` preset's `cacheVariables`). A disabled
@@ -37,10 +56,10 @@ never linked. Selecting a format whose parser is disabled is a configure-time
 ```json
 {
   "server": {"host": "127.0.0.1", "port": 8080, "trustedProxies": "", "corsAllowedOrigins": "*"},
-  "database": {"path": "data/postgresql", "key": "REPLACE_ME", "port": 5433, "name": "oatpp_backend",
+  "database": {"path": "_data/postgresql", "key": "REPLACE_ME", "port": 5433, "name": "oatpp_backend",
                "user": "oatpp_tester"},
   "jwt": {"secret": "REPLACE_ME", "issuer": "oatpp-backend", "ttlSeconds": 3600},
-  "logging": {"level": "INFO", "path": "logs"},
+  "logging": {"level": "INFO", "path": "_logs"},
   "swagger": {"resPath": "/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res"}
 }
 ```
@@ -50,8 +69,8 @@ Use generated secrets for a new installation, or the matching private database
 key/password and a unique JWT secret for an existing installation.
 
 Leaf mapping: `host`/`port`/`trustedProxies`/`corsAllowedOrigins`, `database.path` (`databasePath`: file path
-for SQLCIPHER, e.g. `data/app.db`, or Unix socket dir for
-POSTGRESQL, e.g. `data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
+for SQLCIPHER, e.g. `_data/app.db`, or Unix socket dir for
+POSTGRESQL, e.g. `_data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
 `database.key` (`databaseKey`: SQLCipher encryption key or PostgreSQL
 scram-sha-256 password, never logged), `database.port`/`name`/`user`
 (`databasePort`, …, PostgreSQL connection), `jwt.secret`/`issuer`/
@@ -59,7 +78,7 @@ scram-sha-256 password, never logged), `database.port`/`name`/`user`
 (`swaggerResPath`, Swagger UI assets dir; default is the oatpp-swagger
 library's own res dir via `OATPP_SWAGGER_RES_PATH`, only used when built with
 `APP_WITH_SWAGGER`). The `swagger` section is only written to generated
-`app.conf` files when built with Swagger enabled (it stays in the checked-in
+runtime application files when built with Swagger enabled (it stays in the checked-in
 samples either way); a `swagger` section present while disabled is loaded but
 ignored. `validate()` returns `""` when valid, otherwise a
 message used in exceptions. A file that does not match the grouped schema
@@ -85,7 +104,7 @@ POSTGRESQL only `path`/`key`/`port`/`name`/`user`. Existing files are left
 as-is (each backend reads only its own fields); missing files are created
 with only their backend's fields. For POSTGRESQL `path` (socket dir),
 `port` (non-zero), `name`/`user` (non-empty) and `key` (non-empty scram
-password) are validated. PostgreSQL location defaults are `data/postgresql`,
+password) are validated. PostgreSQL location defaults are `_data/postgresql`,
 `5433`, `oatpp_backend`, and `oatpp_tester`; the password is generated for a new
 configuration and must match the existing cluster for an existing installation.
 
@@ -98,10 +117,10 @@ or compiled in any configuration. No-file builds
 (`USERS=POSTGRESQL`, `ENABLE_SQLCIPHER=OFF`) compile only the PostgreSQL
 backend — no file symbols, no `SqlcipherDocument`.
 
-Startup order: 1) create `configs/app.conf` from per-type defaults and fresh secrets when
+Startup order: 1) create `_configs/app.<format>` from per-type defaults and fresh secrets when
 missing (skip when present); 2) load + validate it — failures in 1)-2) append
 one `HH:MM:SS.mmm [CRITICAL] [config] …` line to
-`<exe-dir>/logs/yyyy-mm-dd.log` (a `logs` directory is created next to the
+`<exe-dir>/_logs/yyyy-mm-dd.log` (a `_logs` directory is created next to the
 executable when needed; same daily format as the main log) and exit 1; 3) logging; 4) database (below); 5)
 REST/Oatpp components; 6) REST server; 7) serve.
 
@@ -251,7 +270,7 @@ secrets).
 `logPath` is a **directory**, not a file — just set the path:
 
 ```json
-{ "logging": {"path": "logs"} }
+{ "logging": {"path": "_logs"} }
 ```
 
 - The active file is `<dir>/yyyy-mm-dd.log` (local date), resolved on every
@@ -261,7 +280,7 @@ secrets).
   Console/stderr output uses the same line format.
 - Empty `path` (`""`) disables file logging (console only).
 - The directory is created on demand; unwritable locations fall back to a
-  stderr notice without crashing. `logs/` is git-ignored.
+  stderr notice without crashing. `_logs/` is git-ignored.
 
 ## Adding or modifying a setting
 
@@ -288,7 +307,7 @@ secrets).
 ```bash
 cmake -S . -B build -DAPP_CONFIG_FORMAT=XML
 cmake --build build
-./build/oatpp-backend --config configs/app.conf
+./build/oatpp-backend
 ```
 
 If the config file does not exist, the server creates it from non-secret
@@ -298,9 +317,11 @@ explicitly supply secrets before constructing `Application`.
 
 ## Version file
 
-Every startup writes `configs/version.conf` (fixed name, like `app.conf`)
-with three values in the `APP_VERSION_FILE_FORMAT` syntax (default JSON,
-independent parser toggle with the same fail-fast rule):
+Every startup validates and updates the version file in place (by default
+`_configs/version.<format>`, colocated in `--config`'s directory when a parent path
+is provided, or explicitly set via `--version-file <path>`) with three values in the
+`APP_VERSION_FILE_FORMAT` syntax (default JSON, independent parser toggle with the
+same fail-fast rule):
 
 - `version`: `APP_VERSION` (`0.0.1` default).
 - `releaseDate`: `APP_RELEASE_DATE` — empty means "stamp the configure date"

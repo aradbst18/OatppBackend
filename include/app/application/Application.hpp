@@ -133,7 +133,7 @@ private:
 ///    entries are synced before proceeding. Each backend reads only its own fields.
 /// 2) loadSettings: parse + validate the file.
 /// Steps 1-2 run before logging exists; failures are reported via
-/// writeCriticalLog() (<exeDir>/logs/yyyy-mm-dd.log next to the executable)
+/// writeCriticalLog() (<exeDir>/_logs/yyyy-mm-dd.log next to the executable)
 /// and throw.
 /// 3) logging, 4) database, 5) REST/Oatpp, 6) server follow in initialize().
 /// Load settings from file-or-defaults, throwing ConfigurationError with a
@@ -151,7 +151,7 @@ void ensureConfigExists(const std::string& configPath);
 config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing = nullptr);
 
 /// Pre-logging failure sink: append one standard-format CRITICAL line to
-/// `<exeDir>/logs/yyyy-mm-dd.log` (the `logs` directory is created next to
+/// `<exeDir>/_logs/yyyy-mm-dd.log` (the `_logs` directory is created next to
 /// the executable when needed). Best effort, never throws. Used only before
 /// the logging system knows its configured destination; afterwards failures
 /// go to the configured log file instead.

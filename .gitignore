@@ -66,10 +66,10 @@ Testing/
 # ── Runtime-generated files ─────────────────────────────────────────
 # Created by the app on first startup/run; never commit these. The
 # checked-in samples (configs/app.{json,toml,xml,yaml}) stay tracked.
-configs/app.conf
-configs/version.conf
-data/
-logs/
+_configs/
+_data/
+_logs/
+*.conf
 *.log
 
 # ── Editor & temporary leftovers ────────────────────────────────────

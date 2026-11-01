@@ -193,17 +193,18 @@ Every preset sets `CMAKE_INSTALL_PREFIX` to `build/<preset-name>/out`, so
 
 ```bash
 cmake --install build/release
-./build/release/out/bin/oatpp-backend --config configs/app.conf
+./build/release/out/bin/oatpp-backend
 ```
 
 Layout: `out/bin/oatpp-backend` plus, only when `APP_ENABLE_SWAGGER=ON`,
 `out/share/swagger-res/` (Swagger UI assets, resolved from the `swagger.resPath`
 setting with exe-relative `../share/swagger-res` and `OATPP_SWAGGER_RES_PATH` env
 fallbacks; dev runs fall back to the configure-time source dir). No config or version files are
-installed: the app creates `configs/app.conf` from defaults on first startup
-when missing and rewrites `configs/version.conf` on every startup, both
-relative to the working directory — pass `--config <path>` to place them
-elsewhere. System shared libraries (OpenSSL, `libzstd`, `libpq` in
+installed: the app creates `_configs/app.<format>` from defaults on first startup
+when missing and rewrites `_configs/version.<format>` on every startup, both
+relative to the working directory — pass `--config <path>` (and optionally
+`--version-file <path>`) to place them elsewhere (by default, the version file
+is colocated with the configuration directory). System shared libraries (OpenSSL, `libzstd`, `libpq` in
 PostgreSQL builds, libstdc++) are expected on the target machine and are
 not bundled.
 

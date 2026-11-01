@@ -1,5 +1,10 @@
 #include "app/config/ConfigStore.hpp"
 
+#include <algorithm>
+#include <cctype>
+
+#include "app/config/RuntimeFilePath.hpp"
+
 namespace app::config
 {
 
@@ -55,10 +60,13 @@ const char* activeFormatName() noexcept
 
 std::string defaultConfigPath()
 {
-    // Deliberately format-independent: every build reads/writes the same
-    // `configs/app.conf` name; only the on-disk syntax follows the active
-    // format. Missing files are created from defaults on startup.
-    return "configs/app.conf";
+    std::string extension = activeFormatName();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c)
+                   {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    return defaultRuntimeFilePath("app", extension);
 }
 
 }  // namespace app::config
