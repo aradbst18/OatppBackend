@@ -34,11 +34,7 @@ void UserService::validateCreateInput(const CreateUserInput& input)
             "Invalid username: must be 4-18 characters containing alphanumeric or @#$ characters");
     }
 
-    if (!validation::isValidPassword(input.password))
-    {
-        throw errors::validation::InvalidValue(
-            "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
-    }
+    validation::validatePassword(input.password);
 
     domain::UserRole role{};
     if (!domain::tryParseUserRole(input.role, role))
@@ -145,11 +141,7 @@ UserInfo UserService::updateUser(const std::string& currentUsername, const Updat
             "Invalid username: must be 4-18 characters containing alphanumeric or @#$ characters");
     }
 
-    if (!validation::isValidPassword(input.password))
-    {
-        throw errors::validation::InvalidValue(
-            "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
-    }
+    validation::validatePassword(input.password);
 
     domain::UserRole role{};
     if (!domain::tryParseUserRole(input.role, role))
@@ -229,11 +221,7 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
     std::optional<std::string> passwordHash;
     if (input.password.has_value())
     {
-        if (!validation::isValidPassword(*input.password))
-        {
-            throw errors::validation::InvalidValue(
-                "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
-        }
+        validation::validatePassword(*input.password);
 
         passwordHash = auth::passwordHash(*input.password);
     }

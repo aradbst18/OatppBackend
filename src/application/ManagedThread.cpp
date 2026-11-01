@@ -28,7 +28,11 @@ void ManagedThread::start()
     }
 
     std::unique_lock<std::mutex> lock(lifecycleMutex_);
-    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    lifecycleCv_.wait(lock,
+                      [this]
+                      {
+                          return !joining_;
+                      });
     if (running_.load())
     {
         return;
@@ -85,7 +89,11 @@ void ManagedThread::stop()
 
     std::unique_lock<std::mutex> lock(lifecycleMutex_);
     requestStop();
-    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    lifecycleCv_.wait(lock,
+                      [this]
+                      {
+                          return !joining_;
+                      });
     // A waiting start() may have reset the flag while another caller was joining.
     requestStop();
     joinLocked(lock);
@@ -99,7 +107,11 @@ void ManagedThread::join()
     }
 
     std::unique_lock<std::mutex> lock(lifecycleMutex_);
-    lifecycleCv_.wait(lock, [this] { return !joining_; });
+    lifecycleCv_.wait(lock,
+                      [this]
+                      {
+                          return !joining_;
+                      });
     joinLocked(lock);
 }
 

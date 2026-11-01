@@ -35,6 +35,8 @@ enum class ErrorCode
     ResourceGone,
     ResourceUnavailable,
     ValidationInvalidValue,
+    ValidationPasswordFormat,
+    ValidationPasswordTooCommon,
     FileNotFound,
     FileReadFailed,
     FileWriteFailed,
@@ -149,6 +151,13 @@ DEFINE_APP_EXCEPTION(Unavailable, ResourceUnavailable, "resource is unavailable"
 namespace validation
 {
 
+inline constexpr const char* kPasswordFormatMessage =
+    "Password must contain 15-128 Unicode characters without control characters";
+inline constexpr const char* kPasswordTooCommonMessage =
+    "Password is too common; choose a different password rather than adding a digit";
+
+DEFINE_APP_EXCEPTION(PasswordFormat, ValidationPasswordFormat, kPasswordFormatMessage);
+DEFINE_APP_EXCEPTION(PasswordTooCommon, ValidationPasswordTooCommon, kPasswordTooCommonMessage);
 DEFINE_APP_EXCEPTION(InvalidValue, ValidationInvalidValue, "invalid value");
 
 }  // namespace validation

@@ -220,8 +220,8 @@ TEST_CASE("config: all formats load and round trip CORS policies and complete mi
 
         for (const auto* policy :
              {"https://app.example.com", "http://localhost:3000, https://trusted.example.com",
-              "http://app_service:3000", "https://app_service.example.com",
-              "http://127.0.0.1:8080, https://[::1]:8443", "http://localhost:0, https://127.0.0.1:65535",
+              "http://app_service:3000", "https://app_service.example.com", "http://127.0.0.1:8080, https://[::1]:8443",
+              "http://localhost:0, https://127.0.0.1:65535",
               " \thttps://xn--bcher-kva.example\t, http://[2001:db8::1]\t ", "*"})
         {
             root["server"]["corsAllowedOrigins"] = policy;

@@ -32,7 +32,7 @@ separately with `sudo -- build/cpp001/tests/private_text_file_tests 'multi-user 
 | `test_config.cpp`      | defaults, validation, JSON/TOML/XML/YAML round-trips, corrupt and missing files, save refusal, active-format match, auto-create, missing-param completion, legacy-key rejection, exe-side critical log, version read/complete/validate |
 | `test_validation.cpp`  | `NumericBounds` for all int widths, username/password rules, required fields, `UserRole` parse/reject |
 | `test_serialization.cpp` | valid parse, `Int8=64654646` rejection, boundary overflow, negative `UInt8`, malformed JSON, missing/null fields |
-| `test_auth.cpp`        | JWT create/verify, wrong secret, expired, malformed, bearer extraction, login success/401/422, whoami, explicit bootstrap credentials, published-password rejection, existing-account preservation |
+| `test_auth.cpp`        | JWT create/verify, wrong secret, expired, malformed, bearer extraction, login success/401/422, whoami, explicit bootstrap credentials, shared password policy, existing-account preservation |
 | `test_database.cpp`    | backend name, CRUD, injection stored literally, bad SQL (message names the failing table), `?`/`:` translation rules + parameter-count checks, repository CRUD (create/get/update/delete, not-found, conflict, invalid input), empty-key plaintext mode, wrong-key open failure, password-hash protocol |
 | `test_pg_test_db.cpp`  | PostgreSQL provisioning preserves unrelated databases, independent run ownership, failed creation, cleanup retry, original connection settings |
 | `test_generic_document.cpp` | `DocumentValue` core, JSON/TOML/XML/YAML parse+serialize round-trips, file-database inspector, PostgreSQL inspector (needs server) |

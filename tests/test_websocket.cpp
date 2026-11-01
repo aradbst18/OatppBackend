@@ -192,7 +192,7 @@ int connectWebSocket(int port)
 TEST_CASE("websocket: echo roundtrip")
 {
     const tests::ScopedEnvironment username("APP_SEED_ADMIN_USERNAME", "admin");
-    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391");
+    const tests::ScopedEnvironment password("APP_SEED_ADMIN_PASSWORD", "TestAdmin8391-safe");
     // Boot the full application on the first free port in the test range.
     std::unique_ptr<application::Application> holder;
     int port = 0;

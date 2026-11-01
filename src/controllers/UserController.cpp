@@ -208,15 +208,15 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 
 1. **Single User:** Send a single JSON object:
    ```json
-   { "username": "alice", "password": "AlicePassword1", "role": "operator" }
+   { "username": "alice", "password": "AlicePassword1-private", "role": "operator" }
    ```
    Responds with `201 Created` returning `UserResponseDto`.
 
 2. **Batch User List:** Send a JSON array of user objects:
    ```json
    [
-     { "username": "alice", "password": "AlicePassword1", "role": "operator" },
-     { "username": "bob", "password": "BobPassword1", "role": "viewer" }
+     { "username": "alice", "password": "AlicePassword1-private", "role": "operator" },
+     { "username": "bob", "password": "BobPassword1-private", "role": "viewer" }
    ]
    ```
    Responds with `201 Created` returning an array of `UserResponseDto`.
@@ -224,7 +224,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 ## Field Validation Rules
 
 - `username` (required): **4-18** characters, charset `[a-zA-Z0-9@#$]`.
-- `password` (required): **6-48** characters, must contain at least **one letter and one digit**.
+- `password` (required): **15-128 Unicode characters**, allowing spaces; control characters and common passwords are rejected. No character mix is required.
 - `role` (required): must be one of `admin`, `operator`, or `viewer`.
 
 ## Error responses
@@ -246,7 +246,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_createUser(
 
     auto singleExample = dto::UserUpsertDto::createShared();
     singleExample->username = oatpp::String("alice01");
-    singleExample->password = oatpp::String("AlicePassword1");
+    singleExample->password = oatpp::String("AlicePassword1-private");
     singleExample->role = oatpp::String("operator");
 
     info->addConsumes<oatpp::Object<dto::UserUpsertDto>>("application/json", "Single user creation payload.")
@@ -287,8 +287,8 @@ curl -s http://localhost:8080/users/batch \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '[
-    {"username":"op1","password":"Password1","role":"operator"},
-    {"username":"op2","password":"Password2","role":"viewer"}
+    {"username":"op1","password":"Password1-private","role":"operator"},
+    {"username":"op2","password":"Password2-private","role":"viewer"}
   ]' | jq
 ```
 
@@ -337,7 +337,7 @@ void UserController::Z__ENDPOINT_ADD_INFO_updateUser(
 
 - Path parameter `username`: current account name in database.
 - Body `username`: new or retained account username (4-18 chars, charset `[a-zA-Z0-9@#$]`).
-- Body `password`: new account password (6-48 chars, letter + digit).
+- Body `password`: new account password (15-128 Unicode characters; no controls or common passwords).
 - Body `role`: new account role (`admin`, `operator`, `viewer`).
 
 ```js
@@ -350,7 +350,7 @@ const res = await fetch("http://localhost:8080/users/old_username", {
   },
   body: JSON.stringify({
     username: "new_username",
-    password: "NewPassword123",
+    password: "NewPassword123-private",
     role: "admin"
   })
 });
@@ -379,7 +379,7 @@ const updated = await res.json();
 
     auto putExample = dto::UserUpsertDto::createShared();
     putExample->username = oatpp::String("alice_new");
-    putExample->password = oatpp::String("NewPassword1");
+    putExample->password = oatpp::String("NewPassword1-private");
     putExample->role = oatpp::String("admin");
 
     info->addConsumes<oatpp::Object<dto::UserUpsertDto>>("application/json", "Full user data set.")
@@ -395,9 +395,9 @@ const updated = await res.json();
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing path or required body fields.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
-    info->addResponse<oatpp::String>(
-        Status::CODE_403, "text/plain",
-        "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator cannot be renamed or demoted.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain",
+                                     "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator "
+                                     "cannot be renamed or demoted.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");
@@ -483,9 +483,9 @@ const user = await res.json();
 
     info->addResponse<oatpp::String>(Status::CODE_400, "text/plain", "Missing path or empty patch body.");
     info->addResponse<oatpp::String>(Status::CODE_401, "text/plain", "Missing or expired bearer token.");
-    info->addResponse<oatpp::String>(
-        Status::CODE_403, "text/plain",
-        "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator cannot be renamed or demoted.");
+    info->addResponse<oatpp::String>(Status::CODE_403, "text/plain",
+                                     "Token role is not admin, is missing, or is unrecognized. Bootstrap administrator "
+                                     "cannot be renamed or demoted.");
     info->addResponse<oatpp::String>(Status::CODE_404, "text/plain", "Current user not found.");
     info->addResponse<oatpp::String>(Status::CODE_409, "text/plain", "New username already taken.");
     info->addResponse<oatpp::String>(Status::CODE_422, "text/plain", "Field validation failure.");

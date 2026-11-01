@@ -9,8 +9,11 @@ namespace app::validation
 /// project's convention with a documented, testable helper.
 bool isValidUsername(const std::string& value) noexcept;
 
-/// Password rule: 6-48 chars; must contain at least one letter and one digit.
+/// New passwords: 15-128 UTF-8 code points, no controls or common passwords.
 bool isValidPassword(const std::string& value) noexcept;
+
+/// Enforce the new-password policy with a public-safe, specific rejection reason.
+void validatePassword(const std::string& value);
 
 /// Non-empty after trimming ASCII whitespace.
 bool isNonBlank(const std::string& value) noexcept;

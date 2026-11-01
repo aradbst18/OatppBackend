@@ -30,11 +30,7 @@ void UserUpsertDto::validate() const
             "Invalid username: must be 4-18 characters containing alphanumeric or @#$ characters");
     }
 
-    if (!validation::isValidPassword(*password))
-    {
-        throw errors::validation::InvalidValue(
-            "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
-    }
+    validation::validatePassword(*password);
 
     domain::UserRole parsedRole{};
     if (!domain::tryParseUserRole(*role, parsedRole))
@@ -62,10 +58,9 @@ void PatchUserDto::validate() const
             "Invalid username: must be 4-18 characters containing alphanumeric or @#$ characters");
     }
 
-    if (hasPassword && !validation::isValidPassword(*password))
+    if (hasPassword)
     {
-        throw errors::validation::InvalidValue(
-            "Invalid password: must be 6-48 characters and contain at least one letter and one digit");
+        validation::validatePassword(*password);
     }
 
     if (hasRole)
@@ -110,16 +105,16 @@ Example: `alice01`)";
 void UserUpsertDto::Z__PROPERTY_ADD_INFO_password(oatpp::data::mapping::type::BaseObject::Property::Info* info)
 {
     info->required = true;
-    info->pattern = "^.{6,48}$";
     info->description =
         R"(**Account plain-text password.**
 
 **Validation Rules:**
-- Length: strictly bounded between 6 and 48 characters.
-- Complexity: must contain at least one letter and at least one digit.
+- Length: 15-128 Unicode code points in valid UTF-8; spaces are allowed.
+- No control characters or whole-password matches in the common-password blocklist.
+- No required mix of letters, digits or symbols.
 - Never returned in responses; salted and hashed immediately on arrival.
 
-Example: `Secret1234`)";
+Example: `a quiet river flows`)";
 }
 
 void UserUpsertDto::Z__PROPERTY_ADD_INFO_role(oatpp::data::mapping::type::BaseObject::Property::Info* info)
@@ -152,14 +147,14 @@ Example: `new_alice`)";
 void PatchUserDto::Z__PROPERTY_ADD_INFO_password(oatpp::data::mapping::type::BaseObject::Property::Info* info)
 {
     info->required = false;
-    info->pattern = "^.{6,48}$";
     info->description =
         R"(**Optional new password.**
 
-- If supplied, updates the account password (must be 6-48 characters with letter + digit).
+- If supplied, updates the password using the shared 15-128 Unicode character policy.
+- Spaces are allowed; controls and common passwords are rejected. No character mix is required.
 - If omitted or null, the existing password remains unchanged.
 
-Example: `NewSecret987`)";
+Example: `another quiet river flows`)";
 }
 
 void PatchUserDto::Z__PROPERTY_ADD_INFO_role(oatpp::data::mapping::type::BaseObject::Property::Info* info)

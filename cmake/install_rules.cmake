@@ -13,6 +13,10 @@
 
 function(setup_install_rules)
     install(TARGETS app_server RUNTIME DESTINATION bin)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/validation/passwords/LICENSE"
+        DESTINATION share/licenses/OatppBackend
+        RENAME SecLists-LICENSE)
 
     if(NOT APP_ENABLE_SWAGGER)
         return()
