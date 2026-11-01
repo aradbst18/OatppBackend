@@ -4,6 +4,7 @@
 #error "TomlDocument.cpp requires APP_WITH_TOML_PARSER (configure with -DAPP_ENABLE_TOML_PARSER=ON)"
 #endif  // !APP_WITH_TOML_PARSER
 
+#include <filesystem>
 #include <sstream>
 
 #include <toml.hpp>
@@ -173,6 +174,12 @@ std::string serializeToml(const DocumentValue& value)
 
 DocumentValue loadTomlFile(const std::string& path)
 {
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec) && !ec)
+    {
+        throw errors::filesystem::NotFound("Cannot open directory as file: " + path);
+    }
+
     try
     {
         const toml::value root = toml::parse(path);

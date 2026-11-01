@@ -7,7 +7,7 @@
         <corsAllowedOrigins>*</corsAllowedOrigins>
     </server>
     <database>
-        <path>data/postgresql</path>
+        <path>_data/postgresql</path>
         <key>REPLACE_ME</key>
         <port>5433</port>
         <name>oatpp_backend</name>
@@ -20,7 +20,7 @@
     </jwt>
     <logging>
         <level>INFO</level>
-        <path>logs</path>
+        <path>_logs</path>
     </logging>
     <swagger>
         <resPath>/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res</resPath>

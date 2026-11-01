@@ -197,7 +197,7 @@ full oatpp headers only in `.cpp`. Headers are self-contained with
   `.vscode/*.json`. No sorting (key order preserved).
 - YAML/TOML/XML: 4-space indent, final newline. Parsed with `PyYAML`,
   `tomllib`, `xml.etree` (`configs/app.yaml`, `app.toml`, `app.xml` valid).
-  `configs/app.conf` / `version.conf` (runtime-generated samples) left
+  `_configs/app.<format>` / `_configs/version.<format>` (runtime-generated files) left
   byte-compatible except final newline.
 - Markdown: ATX headings, `-` lists, fenced code blocks with language tags,
   no trailing whitespace, single final newline. Checked across `docs/*.md`.
@@ -268,7 +268,7 @@ They are developer tools only, not new project dependencies.
   check (no mtime change under `external/`).
 - `build/` (per-preset trees, `build/matrix/`): generated output, ignored by
   `.gitignore`, never formatted.
-- `data/app.db`, `logs/*.log`, `*.o`: binary/runtime artifacts, marked
+- `_data/app.db`, `_logs/*.log`, `*.o`: binary/runtime artifacts, marked
   `binary` in `.gitattributes`, never opened as text.
 - Third-party code outside `external/`: none found. All `src/`/`include/`/`tests/`
   files are project-owned.

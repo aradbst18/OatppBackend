@@ -334,7 +334,7 @@ PostgresqlLocalServer::PostgresqlLocalServer(std::string socketDir, std::uint16_
     }
 
     // postgres -k requires an absolute socket directory;
-    // relative config values like "data/postgresql" are resolved
+    // relative config values like "_data/postgresql" are resolved
     // against the process working directory. TCP hosts (no slash) pass through.
     if (socketDir_.find('/') != std::string::npos)
     {

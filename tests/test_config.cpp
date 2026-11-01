@@ -1,6 +1,7 @@
 #include "support/TestRunner.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -12,6 +13,7 @@
 
 #include "app/application/Application.hpp"
 #include "app/config/ConfigStore.hpp"
+#include "app/config/RuntimeFilePath.hpp"
 #include "app/config/VersionFile.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/infrastructure/TextFile.hpp"
@@ -1104,7 +1106,154 @@ TEST_CASE("config: active store matches compile-time format")
     auto store = config::createActiveStore();
 
     EXPECT_EQ(std::string(store->formatName()), std::string(config::activeFormatName()));
-    EXPECT_EQ(std::string(config::defaultConfigPath()), std::string("configs/app.conf"));
+    std::string extension = config::activeFormatName();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c)
+                   {
+                       return static_cast<char>(std::tolower(c));
+                   });
+    EXPECT_EQ(config::defaultConfigPath(), config::defaultRuntimeFilePath("app", extension));
+}
+
+TEST_CASE("config: selected runtime extensions take priority over legacy files for both filenames")
+{
+    struct WorkingDirectory
+    {
+        std::filesystem::path previous = std::filesystem::current_path();
+        std::filesystem::path directory = "/tmp/opencode/runtime-format-selection";
+        ~WorkingDirectory()
+        {
+            std::filesystem::current_path(previous);
+            std::filesystem::remove_all(directory);
+        }
+    } fixture;
+    std::filesystem::remove_all(fixture.directory);
+    std::filesystem::create_directories(fixture.directory);
+    std::filesystem::current_path(fixture.directory);
+    for (const std::string stem : {"app", "version"})
+    {
+        for (const std::string extension : {"json", "toml", "xml", "yaml"})
+        {
+            std::filesystem::remove_all("_configs");
+            const auto expected = "_configs/" + stem + "." + extension;
+            EXPECT_EQ(config::defaultRuntimeFilePath(stem, extension), expected);
+            std::string upper = stem + "." + extension;
+            std::transform(upper.begin(), upper.end(), upper.begin(),
+                           [](unsigned char c)
+                           {
+                               return static_cast<char>(std::toupper(c));
+                           });
+            upper = "_configs/" + upper;
+            const auto legacy = "_configs/" + stem + ".CONF";
+            infrastructure::writeTextFile(legacy, "legacy");
+            EXPECT_EQ(config::defaultRuntimeFilePath(stem, extension), legacy);
+            infrastructure::writeTextFile(upper, "selected");
+            EXPECT_EQ(config::defaultRuntimeFilePath(stem, extension), upper);
+        }
+    }
+}
+
+TEST_CASE("config: runtime filenames reuse case variants without changing secrets")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-config-case";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    const auto upper = (directory / "APP.CONF").string();
+    const auto lower = (directory / "app.conf").string();
+    application::ensureConfigExists(upper);
+    EXPECT_TRUE(std::filesystem::exists(upper));
+    EXPECT_FALSE(std::filesystem::exists(lower));
+    const auto original = application::loadSettings(upper);
+    application::ensureConfigExists(lower);
+    const auto reused = application::loadSettings(lower);
+    EXPECT_EQ(reused.jwtSecret, original.jwtSecret);
+#if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
+    EXPECT_TRUE(reused.databaseKey == original.databaseKey);
+#endif
+    EXPECT_FALSE(std::filesystem::exists(lower));
+    EXPECT_EQ(config::resolveRuntimeFilePath(lower), upper);
+    infrastructure::writeTextFile((directory / "OTHER.CONF").string(), "unchanged");
+    EXPECT_EQ(config::resolveRuntimeFilePath((directory / "other.conf").string()), (directory / "other.conf").string());
+    infrastructure::writeTextFile(lower, "duplicate");
+    EXPECT_THROW_AS(config::resolveRuntimeFilePath(lower), errors::config::Invalid);
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("config: runtime path resolution handles inaccessible or non-directory parents gracefully")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-config-parent";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+
+    // 1. Parent exists but is a regular file
+    const auto parentFile = directory / "parent_file";
+    infrastructure::writeTextFile(parentFile.string(), "not a directory");
+    const auto configUnderFile = (parentFile / "app.conf").string();
+    EXPECT_EQ(config::resolveRuntimeFilePath(configUnderFile), configUnderFile);
+
+    // 2. Parent directory is inaccessible (perms::none)
+    const auto noPermDir = directory / "no_perms";
+    std::filesystem::create_directories(noPermDir);
+    std::filesystem::permissions(noPermDir, std::filesystem::perms::none);
+    const auto configUnderNoPerm = (noPermDir / "app.conf").string();
+    EXPECT_EQ(config::resolveRuntimeFilePath(configUnderNoPerm), configUnderNoPerm);
+
+    // Restore permissions so cleanup succeeds
+    std::filesystem::permissions(noPermDir, std::filesystem::perms::all);
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("config: runtime path resolution and loading ignore subdirectories matching config filename")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-config-subdir";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+
+    // 1. A subdirectory named "app.conf" exists alongside a regular file "APP.CONF"
+    const auto subDir = directory / "app.conf";
+    std::filesystem::create_directories(subDir);
+    const auto fileUpper = (directory / "APP.CONF").string();
+    infrastructure::writeTextFile(fileUpper, "valid");
+
+    // resolveRuntimeFilePath should ignore the subdirectory and resolve to the regular file
+    EXPECT_EQ(config::resolveRuntimeFilePath((directory / "app.conf").string()), fileUpper);
+
+    // 2. Only the subdirectory exists: ensuring or loading should explicitly throw ConfigurationInvalid
+    std::filesystem::remove(fileUpper);
+    EXPECT_THROW_AS(application::ensureConfigExists(subDir.string()), errors::config::Invalid);
+    EXPECT_THROW_AS(application::loadSettings(subDir.string()), errors::config::Invalid);
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("config: version file colocated with custom config path or explicit version path")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-config-version-colocation";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+
+    // 1. defaultVersionFilePath accepts a custom directory
+    const auto colocatedVersionPath = config::defaultVersionFilePath(directory.string());
+    EXPECT_EQ(std::filesystem::path(colocatedVersionPath).parent_path().string(), directory.string());
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("config: runtime path resolution skips filenames without extensions")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-config-no-ext";
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+
+    // Create a file named "App" (e.g. an executable or script)
+    const auto appFile = directory / "App";
+    infrastructure::writeTextFile(appFile.string(), "binary content");
+
+    // Resolving "app" without an extension should NOT match "App"
+    const auto requested = (directory / "app").string();
+    EXPECT_EQ(config::resolveRuntimeFilePath(requested), requested);
+
+    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("config: missing non-secret leaves are recorded and completed in all formats")
@@ -1156,7 +1305,7 @@ TEST_CASE("startup: pre-logging failures land beside the executable")
 
     application::writeCriticalLog(dir, "config", "boom-probe");
 
-    const std::string file = dir + "/logs/" + logging::Logger::currentDateString() + ".log";
+    const std::string file = dir + "/_logs/" + logging::Logger::currentDateString() + ".log";
     EXPECT_TRUE(infrastructure::fileExists(file));
 
     const std::string body = infrastructure::readTextFile(file);

@@ -6,7 +6,7 @@
         "corsAllowedOrigins": "*"
     },
     "database": {
-        "path": "data/postgresql",
+        "path": "_data/postgresql",
         "key": "REPLACE_ME",
         "port": 5433,
         "name": "oatpp_backend",
@@ -19,7 +19,7 @@
     },
     "logging": {
         "level": "INFO",
-        "path": "logs"
+        "path": "_logs"
     },
     "swagger": {
         "resPath": "/usr/local/include/oatpp-1.3.0/bin/oatpp-swagger/res"

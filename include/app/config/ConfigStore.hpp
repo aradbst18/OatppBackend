@@ -116,8 +116,8 @@ std::unique_ptr<IConfigStore> createActiveStore();
 /// Human-readable name of the active format ("JSON", "TOML", "XML" or "YAML").
 const char* activeFormatName() noexcept;
 
-/// Default config file for the active format. The name is format-independent
-/// (`configs/app.conf`); only the on-disk syntax follows the active format.
+/// Default config file for the active format. The extension follows the active format
+/// (`_configs/app.<format>`), reusing case variants and legacy .conf files.
 /// The file is created from defaults on first startup when missing.
 std::string defaultConfigPath();
 

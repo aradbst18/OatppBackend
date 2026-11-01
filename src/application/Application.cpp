@@ -23,6 +23,7 @@
 
 #include "app/auth/PasswordHash.hpp"
 #include "app/config/ConfigStore.hpp"
+#include "app/config/RuntimeFilePath.hpp"
 #include "app/config/VersionFile.hpp"
 #include "app/controllers/AuthController.hpp"
 #include "app/controllers/EchoController.hpp"
@@ -137,7 +138,30 @@ void Application::initInfrastructure()
         // Same completeness contract as the main config: create when
         // missing, complete absent fields from the current build info,
         // reject wrong types and invalid values.
-        const std::string versionPath = config::defaultVersionFilePath();
+        std::string versionPath;
+        if (!settings_.versionPath.empty())
+        {
+            versionPath = config::resolveRuntimeFilePath(settings_.versionPath);
+        }
+        else
+        {
+            std::string configDir;
+            if (!settings_.configSource.empty())
+            {
+                std::string clean = settings_.configSource;
+                const auto pos = clean.find(" (created)");
+                if (pos != std::string::npos)
+                {
+                    clean = clean.substr(0, pos);
+                }
+                const std::filesystem::path cfg(clean);
+                if (cfg.has_parent_path())
+                {
+                    configDir = cfg.parent_path().string();
+                }
+            }
+            versionPath = config::defaultVersionFilePath(configDir);
+        }
         const std::vector<std::string> completed = config::ensureVersionFile(versionPath);
         const config::VersionInfo version = config::currentVersionInfo();
         if (completed.empty())
@@ -456,7 +480,7 @@ std::shared_ptr<repositories::RefreshTokenRepository> Application::refreshTokenR
 
 config::AppSettings loadSettingsOrDefaults(const std::string& configPath)
 {
-    std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
+    std::string path = configPath.empty() ? config::defaultConfigPath() : config::resolveRuntimeFilePath(configPath);
     const bool missingBefore = !infrastructure::fileExists(path);
     ensureConfigExists(path);
     config::AppSettings loaded = loadSettings(path);
@@ -471,7 +495,12 @@ config::AppSettings loadSettingsOrDefaults(const std::string& configPath)
 
 void ensureConfigExists(const std::string& configPath)
 {
-    std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
+    std::string path = configPath.empty() ? config::defaultConfigPath() : config::resolveRuntimeFilePath(configPath);
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec) && !ec)
+    {
+        throw errors::config::Invalid("Configuration path is a directory: " + path);
+    }
     if (infrastructure::fileExists(path))
     {
         // Another startup may have published the file but not yet synced its
@@ -494,7 +523,12 @@ void ensureConfigExists(const std::string& configPath)
 
 config::AppSettings loadSettings(const std::string& configPath, std::vector<std::string>* missing)
 {
-    std::string path = configPath.empty() ? config::defaultConfigPath() : configPath;
+    std::string path = configPath.empty() ? config::defaultConfigPath() : config::resolveRuntimeFilePath(configPath);
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec) && !ec)
+    {
+        throw errors::config::Invalid("Configuration path is a directory: " + path);
+    }
     auto store = config::createActiveStore();
     return store->load(path, missing);
 }
@@ -515,9 +549,9 @@ void writeCriticalLog(const std::string& exeDir, const std::string& tag, const s
     try
     {
         // Same daily file layout as the main log, rooted next to the
-        // executable: <exeDir>/logs/yyyy-mm-dd.log.
+        // executable: <exeDir>/_logs/yyyy-mm-dd.log.
         const std::string base = exeDir.empty() ? "." : exeDir;
-        const std::string dir = base + "/logs";
+        const std::string dir = base + "/_logs";
         const std::string path = dir + "/" + logging::Logger::currentDateString() + ".log";
         const std::string line =
             logging::Logger::formatLine(logging::Logger::currentTimeString(), logging::Level::Critical, tag, message) +

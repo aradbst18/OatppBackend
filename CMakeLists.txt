@@ -43,6 +43,7 @@ add_library(
     src/config/AppSettings.cpp
     src/config/VersionFile.cpp
     src/config/ConfigFactory.cpp
+    src/config/RuntimeFilePath.cpp
     src/infrastructure/database/DatabaseFactory.cpp
     src/infrastructure/database/DatabaseExecutor.cpp
     src/infrastructure/database/OrmSupport.cpp

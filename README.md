@@ -69,8 +69,8 @@ invocations, no checked-in matrix); see [`docs/cmake.md`](docs/cmake.md).
 
 One format active at compile time (`APP_CONFIG_JSON/_TOML/_XML/_YAML` define).
 Same `AppSettings` fields in every format; see [`docs/configuration.md`](docs/configuration.md)
-and `configs/app.{json,toml,xml,yaml}` samples. The runtime file is always
-`configs/app.conf`, created with unique JWT and database secrets when missing.
+and `configs/app.{json,toml,xml,yaml}` samples. The runtime file is
+`_configs/app.<format>` (extension selected at build time), created with unique JWT and database secrets when missing.
 The generated file is owner-only (`0600`). Checked-in samples contain rejected
 `REPLACE_ME` placeholders; existing configurations must provide private secrets.
 
@@ -117,7 +117,7 @@ nothing is compiled or linked. See [`docs/zlib.md`](docs/zlib.md).
 read -r -s -p 'Initial administrator password: ' APP_SEED_ADMIN_PASSWORD
 export APP_SEED_ADMIN_PASSWORD
 printf '\n'
-./build/oatpp-backend --config configs/app.conf
+./build/oatpp-backend
 # --help for usage; missing files are created from defaults on startup
 ```
 

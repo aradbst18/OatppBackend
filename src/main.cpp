@@ -6,6 +6,7 @@
 #include "app/application/Application.hpp"
 #include "app/application/TerminateHandler.hpp"
 #include "app/config/ConfigStore.hpp"
+#include "app/config/RuntimeFilePath.hpp"
 #include "app/errors/AppException.hpp"
 #include "app/logging/Logger.hpp"
 
@@ -14,12 +15,28 @@ namespace
 
 void printUsage(const char* argv0)
 {
-    std::cout << "Usage: " << argv0 << " [--config <path>] [--help]\n"
+    std::string defaultConfig;
+    try
+    {
+        defaultConfig = app::config::defaultConfigPath();
+    }
+    catch (...)
+    {
+        std::string format = app::config::activeFormatName();
+        for (char& c : format)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        defaultConfig = "_configs/app." + format;
+    }
+
+    std::cout << "Usage: " << argv0 << " [--config <path>] [--version-file <path>] [--help]\n"
               << "\n"
               << "Options:\n"
-              << "  --config <path>  Config file (default: " << app::config::defaultConfigPath() << " for the active "
+              << "  --config <path>        Config file (default: " << defaultConfig << " for the active "
               << app::config::activeFormatName() << " format)\n"
-              << "  --help           Show this help\n";
+              << "  --version-file <path>  Version file (default: colocated with config)\n"
+              << "  --help                 Show this help\n";
 }
 
 }  // namespace
@@ -29,31 +46,44 @@ int main(int argc, char** argv)
     app::application::installTerminateHandler();
 
     std::string configPath;
-    for (int i = 1; i < argc; ++i)
+    std::string versionFilePath;
+    try
     {
-        const std::string arg = argv[i];
-        if (arg == "--help" || arg == "-h")
+        for (int i = 1; i < argc; ++i)
         {
-            printUsage(argv[0]);
-            return 0;
-        }
+            const std::string arg = argv[i];
+            if (arg == "--help" || arg == "-h")
+            {
+                printUsage(argv[0]);
+                return 0;
+            }
 
-        if (arg == "--config" && i + 1 < argc)
-        {
-            configPath = argv[++i];
+            if (arg == "--config" && i + 1 < argc)
+            {
+                configPath = argv[++i];
+            }
+            else if (arg == "--version-file" && i + 1 < argc)
+            {
+                versionFilePath = argv[++i];
+            }
+            else
+            {
+                std::cerr << "Unknown argument: " << arg << "\n";
+                printUsage(argv[0]);
+                return 1;
+            }
         }
-        else
-        {
-            std::cerr << "Unknown argument: " << arg << "\n";
-            printUsage(argv[0]);
-            return 1;
-        }
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error parsing arguments: " << ex.what() << "\n";
+        return 1;
     }
 
     const std::string exeDir = app::application::executableDir(argv[0]);
 
     // Steps 1-2 run before logging has a destination: any failure is written
-    // to <exeDir>/logs/yyyy-mm-dd.log and the application terminates.
+    // to <exeDir>/_logs/yyyy-mm-dd.log and the application terminates.
     app::config::AppSettings settings;
     std::vector<std::string> missing;
     try
@@ -64,6 +94,10 @@ int main(int argc, char** argv)
         // 2) Extract + validate; absent non-secret leaves fall back to defaults
         // and are recorded for completion. Missing secrets and invalid values throw.
         settings = app::application::loadSettings(configPath, &missing);
+        if (!versionFilePath.empty())
+        {
+            settings.versionPath = versionFilePath;
+        }
     }
     catch (const app::errors::AppException& ex)
     {
@@ -100,7 +134,8 @@ int main(int argc, char** argv)
         if (!missing.empty())
         {
             // 2b) Complete the file with the defaulted parameters.
-            const std::string path = configPath.empty() ? app::config::defaultConfigPath() : configPath;
+            const std::string path =
+                configPath.empty() ? app::config::defaultConfigPath() : app::config::resolveRuntimeFilePath(configPath);
             auto store = app::config::createActiveStore();
             store->save(path, settings);
 

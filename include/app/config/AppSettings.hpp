@@ -19,9 +19,9 @@ struct AppSettings
     std::string trustedProxies;
 
     /// Unified database location:
-    /// - SQLCIPHER: filesystem path of the database file (e.g. "data/app.db", ":memory:" in tests).
-    /// - POSTGRESQL: Unix socket directory of the local server (e.g. "data/postgresql", see docs/postgresql.md).
-    std::string databasePath = "data/app.db";
+    /// - SQLCIPHER: filesystem path of the database file (e.g. "_data/app.db", ":memory:" in tests).
+    /// - POSTGRESQL: Unix socket directory of the local server (e.g. "_data/postgresql", see docs/postgresql.md).
+    std::string databasePath = "_data/app.db";
 
 #if defined(APP_USER_DATABASE_ENCRYPTED) || defined(APP_DATABASE_POSTGRESQL)
     // Unified database secret:
@@ -49,7 +49,7 @@ struct AppSettings
 
     /// Directory holding daily log files (`<dir>/yyyy-mm-dd.log`). Empty
     /// disables file logging (console/stderr only). Created on demand.
-    std::string logPath = "logs";
+    std::string logPath = "_logs";
 
     /// Directory with the Swagger UI assets (index.html, *.js, *.css) served
     /// at `/swagger/ui`. Default is the oatpp-swagger library's own res dir
@@ -61,6 +61,7 @@ struct AppSettings
     /// "*" or comma-separated exact HTTP(S) origins; explicit empty values are invalid.
     std::string corsAllowedOrigins = "*";
     std::string configSource;  // filled with the file the settings came from
+    std::string versionPath;   // runtime version file path; when empty, colocated with configSource
 
     /// Non-secret defaults. Secrets must be supplied before validation;
     /// first startup generates and persists them in the new config file.

@@ -34,9 +34,9 @@ struct VersionInfo
 /// Snapshot the current version info (startupTime = now, local HH:MM:SS).
 VersionInfo currentVersionInfo();
 
-/// Default version file path (`configs/version.conf`). The name is fixed like
-/// the main config; only the on-disk syntax follows APP_VERSION_FILE_FORMAT.
-std::string defaultVersionFilePath();
+/// Default version path under directory (defaults to _configs), using APP_VERSION_FILE_FORMAT as extension.
+/// Reuses case variants and existing legacy .conf files.
+std::string defaultVersionFilePath(const std::string& directory = "");
 
 /// Atomically write `info` to `path` with owner-only permissions (0600) in
 /// the compile-time-selected version file format.

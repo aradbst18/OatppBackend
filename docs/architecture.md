@@ -82,7 +82,7 @@ and validation errors are normalized to 400/422 without returning parser text.
 
 ```text
 configure (ensureConfigExists -> loadSettings; pre-logging failures go to
-  <exe-dir>/logs/yyyy-mm-dd.log and exit 1)
+  <exe-dir>/_logs/yyyy-mm-dd.log and exit 1)
   -> initInfrastructure (log level, oatpp Environment + bridge, once per process)
   -> initDatabase (PG: ensureProvisioned [data dir -> initdb scram -> start
      socket+TCP -> role/db -> scram enforce -> port-in-use fail-fast] |
@@ -94,7 +94,7 @@ configure (ensureConfigExists -> loadSettings; pre-logging failures go to
   -> stop (server->stop, provider->stop, cleanup stop/join, db->close; idempotent)
 ```
 
-`main()` only parses `--config/--help`, installs the terminate handler, and
+`main()` only parses `--config/--version-file/--help`, installs the terminate handler, and
 calls `run()`. Tests drive `initialize()` without blocking to get routers and
 services without sockets.
 

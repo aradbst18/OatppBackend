@@ -113,21 +113,21 @@ AppSettings AppSettings::defaults()
 
 #ifdef APP_DATABASE_POSTGRESQL
     // Local socket server defaults (see docs/postgresql.md):
-    // socket dir data/postgresql, port 5433, db oatpp_backend, role oatpp_tester.
-    s.databasePath = "data/postgresql";
+    // socket dir _data/postgresql, port 5433, db oatpp_backend, role oatpp_tester.
+    s.databasePath = "_data/postgresql";
     s.databasePort = 5433;
     s.databaseName = "oatpp_backend";
     s.databaseUser = "oatpp_tester";
 
 #else
-    s.databasePath = "data/app.db";
+    s.databasePath = "_data/app.db";
 
 #endif  // APP_DATABASE_POSTGRESQL
 
     s.jwtIssuer = "oatpp-backend";
     s.jwtTtlSeconds = 3600;
     s.logLevel = "INFO";
-    s.logPath = "logs";
+    s.logPath = "_logs";
 
 #ifdef OATPP_SWAGGER_RES_PATH
     s.swaggerResPath = OATPP_SWAGGER_RES_PATH;

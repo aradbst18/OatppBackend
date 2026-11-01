@@ -1,6 +1,7 @@
 #include "support/TestRunner.hpp"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <regex>
@@ -34,9 +35,41 @@ TEST_CASE("version: current info carries build version and dates")
     EXPECT_TRUE(std::regex_match(info.startupTime, std::regex(R"(^\d{2}:\d{2}:\d{2}$)")));
 }
 
-TEST_CASE("version: default path is configs/version.conf")
+TEST_CASE("version: default path follows the selected format")
 {
-    EXPECT_EQ(config::defaultVersionFilePath(), std::string("configs/version.conf"));
+#if defined(APP_VERSION_FILE_JSON)
+    const std::string extension = ".json";
+#elif defined(APP_VERSION_FILE_TOML)
+    const std::string extension = ".toml";
+#elif defined(APP_VERSION_FILE_XML)
+    const std::string extension = ".xml";
+#elif defined(APP_VERSION_FILE_YAML)
+    const std::string extension = ".yaml";
+#endif  // APP_VERSION_FILE format selection (JSON / TOML / XML / YAML)
+    const std::filesystem::path path(config::defaultVersionFilePath());
+    EXPECT_EQ(path.parent_path().string(), std::string("_configs"));
+    EXPECT_TRUE(path.extension() == extension || path.extension() == ".conf");
+
+    const std::filesystem::path customDir = "/tmp/opencode/custom-version-dir";
+    const std::filesystem::path customPath(config::defaultVersionFilePath(customDir.string()));
+    EXPECT_EQ(customPath.parent_path().string(), customDir.string());
+    EXPECT_TRUE(customPath.extension() == extension || customPath.extension() == ".conf");
+}
+
+TEST_CASE("version: existing case variants are validated and updated in place")
+{
+    const std::filesystem::path directory = "/tmp/opencode/runtime-version-case";
+    std::filesystem::remove_all(directory);
+    const auto upper = (directory / "VERSION.CONF").string();
+    const auto lower = (directory / "version.conf").string();
+    config::writeVersionFile(upper, {"1.2.3", "2026-01-02", "01:02:03"});
+    EXPECT_TRUE(std::filesystem::exists(upper));
+    EXPECT_FALSE(std::filesystem::exists(lower));
+    EXPECT_EQ(config::readVersionFile(lower).version, std::string("1.2.3"));
+    EXPECT_TRUE(config::ensureVersionFile(lower).empty());
+    EXPECT_EQ(config::readVersionFile(upper).version, std::string(APP_VERSION));
+    EXPECT_FALSE(std::filesystem::exists(lower));
+    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("version: version file format define matches exactly one")
