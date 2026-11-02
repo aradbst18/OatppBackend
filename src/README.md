@@ -56,6 +56,7 @@ Visual layout of C++ implementation files located under `src/`.
     ├── 📁middlewares
     │   ├── AuthInterceptor.cpp
     │   ├── CorsInterceptor.cpp
+    │   ├── LoggingInterceptor.cpp
     │   └── RateLimitInterceptor.cpp
     ├── 📁repositories
     │   ├── BaseRepository.cpp
@@ -85,8 +86,8 @@ Visual layout of C++ implementation files located under `src/`.
 | **`dto/`** | Oat++ DTO field macros, self-validation logic (`validate()`), and Swagger metadata definitions (`AuthDtos`, `UserDtos`) |
 | **`errors/`** | Exception construction, HTTP status code translation, and error payload formatting |
 | **`infrastructure/`** | Dual-backend database connections (SQLCipher & PostgreSQL), document tree serialization, and Swagger setup |
-| **`logging/`** | Thread-safe, non-blocking log appenders with console formatting and Oat++ framework log redirection |
-| **`middlewares/`** | Pipeline interceptors verifying JWT Bearer tokens, appending CORS headers, and enforcing request rate limits |
+| **`logging/`** | Thread-safe, non-blocking log appenders with console formatting, daily rolling log files, case-insensitive level parsing, console milestones, and Oat++ framework log redirection |
+| **`middlewares/`** | Pipeline interceptors verifying JWT Bearer tokens, appending CORS headers, enforcing request rate limits, and performing request correlation / latency access logging (`LoggingInterceptor`) |
 | **`repositories/`** | SQL query execution, result-set cursor mapping, and schema initialization via `ensureSchema()` |
 | **`serialization/`** | Oat++ ObjectMapper customization with strict range validation deserializers |
 | **`services/`** | Core business use cases (authentication, credential verification, refresh token lifecycle, user CRUD and role management) |
