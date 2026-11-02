@@ -4,6 +4,7 @@
 
 #include "app/dto/AuthDtos.hpp"
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
 
 namespace app::controllers
@@ -607,6 +608,7 @@ curl -s -X DELETE http://localhost:8080/users \
 std::shared_ptr<UserController::OutgoingResponse> UserController::listUsers(
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling list users endpoint");
     requireAuthenticatedRole(request);
 
     const auto users = userService_->listUsers();
@@ -626,6 +628,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::listUsers(
 std::shared_ptr<UserController::OutgoingResponse> UserController::getUser(
     const oatpp::String& username, const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling get user endpoint for '" + textOf(username) + "'");
     requireAuthenticatedRole(request);
 
     if (!username || username->empty())
@@ -645,6 +648,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::getUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::createUser(
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling create user endpoint");
     requireAdmin(request);
 
     const auto bodyStr = request->readBodyToString();
@@ -719,6 +723,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::createUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::createUsersBatch(
     const oatpp::Vector<oatpp::Object<dto::UserUpsertDto>>& body, const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling create users batch endpoint");
     requireAdmin(request);
 
     if (!body || body->empty())
@@ -759,6 +764,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::updateUser(
     const oatpp::String& username, const oatpp::Object<dto::UserUpsertDto>& body,
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling update user endpoint for '" + textOf(username) + "'");
     requireAdmin(request);
 
     if (!username || username->empty())
@@ -788,6 +794,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::patchUser(
     const oatpp::String& username, const oatpp::Object<dto::PatchUserDto>& body,
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling patch user endpoint for '" + textOf(username) + "'");
     requireAdmin(request);
 
     if (!username || username->empty())
@@ -830,6 +837,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::patchUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::deleteUser(
     const oatpp::String& username, const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling delete user endpoint for '" + textOf(username) + "'");
     requireAdmin(request);
 
     if (!username || username->empty())
@@ -845,6 +853,7 @@ std::shared_ptr<UserController::OutgoingResponse> UserController::deleteUser(
 std::shared_ptr<UserController::OutgoingResponse> UserController::deleteAllUsers(
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("users", "UserController: handling delete all users endpoint");
     requireAdmin(request);
 
     const auto result = userService_->deleteAllUsers();

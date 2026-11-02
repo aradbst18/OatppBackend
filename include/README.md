@@ -54,6 +54,7 @@ Visual layout of public headers and interface definitions located under `include
         ├── 📁middlewares
         │   ├── AuthInterceptor.hpp
         │   ├── CorsInterceptor.hpp
+        │   ├── LoggingInterceptor.hpp
         │   └── RateLimitInterceptor.hpp
         ├── 📁repositories
         │   ├── BaseRepository.hpp
@@ -86,8 +87,8 @@ Visual layout of public headers and interface definitions located under `include
 | **`dto/`** | Data Transfer Objects representing API wire models and serialized request/response contracts (`AuthDtos`, `UserDtos`) with `validate()` self-validation |
 | **`errors/`** | Domain exception hierarchy (`AppException`) and framework error mapper (`ErrorMapper`) |
 | **`infrastructure/`** | Database abstraction (`IDatabase`, SQLCipher, PostgreSQL), generic document parsers, GZIP compression, and Swagger |
-| **`logging/`** | Thread-safe logging subsystem (`Logger`) and Oat++ log bridge integration (`OatppLoggerBridge`) |
-| **`middlewares/`** | HTTP request interceptors for Bearer token verification, CORS headers, and token-bucket rate limiting |
+| **`logging/`** | Thread-safe logging subsystem (`Logger`, levels `TRACE..CRITICAL, OFF`), request correlation context (`RequestContext`), lifecycle milestones (`logMilestone`), and Oat++ log bridge integration (`OatppLoggerBridge`) |
+| **`middlewares/`** | HTTP request/response interceptors for Bearer token verification, CORS headers, token-bucket rate limiting, and request correlation / access logging (`LoggingInterceptor`) |
 | **`repositories/`** | Persistence abstraction layer and ORM query templates over `DatabaseExecutor` |
 | **`serialization/`** | JSON object mapper configuration (`AppObjectMapper`) and range-validating deserializers |
 | **`services/`** | Pure C++ business logic use cases (`AuthService`, `UserService`) decoupled from Oat++ HTTP layer |

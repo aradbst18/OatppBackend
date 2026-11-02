@@ -41,6 +41,7 @@
 #include "app/logging/OatppLoggerBridge.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
 #include "app/middlewares/CorsInterceptor.hpp"
+#include "app/middlewares/LoggingInterceptor.hpp"
 #include "app/middlewares/RateLimitInterceptor.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/serialization/AppObjectMapper.hpp"
@@ -130,7 +131,7 @@ void Application::initInfrastructure()
 
     if (!settings_.logPath.empty())
     {
-        logging::logInfo("app", "File logging to " + logging::Logger::resolveLogFilePath(settings_.logPath));
+        logging::logDebug("app", "File logging to " + logging::Logger::resolveLogFilePath(settings_.logPath));
     }
 
     try
@@ -166,8 +167,8 @@ void Application::initInfrastructure()
         const config::VersionInfo version = config::currentVersionInfo();
         if (completed.empty())
         {
-            logging::logInfo("app",
-                             "Version " + version.version + " (" + version.releaseDate + ") written to " + versionPath);
+            logging::logMilestone("app", "Version " + version.version + " (" + version.releaseDate + ") written to " +
+                                             versionPath);
         }
         else
         {
@@ -177,8 +178,8 @@ void Application::initInfrastructure()
                 joined += (joined.empty() ? "" : ", ") + name;
             }
 
-            logging::logInfo("app", "Version " + version.version + " (" + version.releaseDate + ") written to " +
-                                        versionPath + " (completed missing parameters: " + joined + ")");
+            logging::logMilestone("app", "Version " + version.version + " (" + version.releaseDate + ") written to " +
+                                             versionPath + " (completed missing parameters: " + joined + ")");
         }
     }
     catch (const std::exception& ex)
@@ -194,7 +195,7 @@ void Application::initInfrastructure()
         throw;
     }
 
-    logging::logInfo("app", "Initializing infrastructure");
+    logging::logMilestone("app", "Initializing infrastructure");
 }
 
 void Application::initDatabase()
@@ -230,11 +231,11 @@ void Application::initDatabase()
     const bool missing = settings_.databasePath != ":memory:" && !infrastructure::fileExists(settings_.databasePath);
     if (missing)
     {
-        logging::logInfo("app", "User database file missing at '" + settings_.databasePath + "'; creating");
+        logging::logDebug("app", "User database file missing at '" + settings_.databasePath + "'; creating");
     }
     else
     {
-        logging::logInfo("app", "User database file exists at '" + settings_.databasePath + "'; verifying admin user");
+        logging::logDebug("app", "User database file exists at '" + settings_.databasePath + "'; verifying admin user");
     }
 
 #ifdef APP_USER_DATABASE_ENCRYPTED
@@ -261,7 +262,7 @@ void Application::initDatabase()
     refreshTokens_ = std::make_shared<repositories::RefreshTokenRepository>(database_);
     refreshTokens_->ensureSchema();
 
-    logging::logInfo("app", "Database opened (" + database_->backendName() + ")");
+    logging::logDebug("app", "Database opened (" + database_->backendName() + ")");
 }
 
 void Application::initServices()
@@ -272,7 +273,7 @@ void Application::initServices()
     const std::string adminUsername = auth_->ensureSeeded();
 
     userService_ = std::make_shared<services::UserService>(users_, adminUsername);
-    logging::logInfo("app", "Services initialized");
+    logging::logMilestone("app", "Services initialized");
 }
 
 void Application::initRouting()
@@ -321,6 +322,9 @@ void Application::initRouting()
     httpHandler_ = std::make_shared<oatpp::web::server::HttpConnectionHandler>(components);
     httpHandler_->setErrorHandler(errors::AppErrorHandler::createShared());
 
+    auto loggingInterceptor = std::make_shared<middlewares::LoggingInterceptor>();
+    httpHandler_->addRequestInterceptor(loggingInterceptor);
+
     auto cors = std::make_shared<middlewares::CorsInterceptor>(settings_.corsAllowedOrigins);
     httpHandler_->addRequestInterceptor(cors);
     httpHandler_->addResponseInterceptor(cors);
@@ -330,13 +334,21 @@ void Application::initRouting()
     httpHandler_->addRequestInterceptor(std::make_shared<middlewares::RateLimitInterceptor>(rateLimitOptions));
     httpHandler_->addRequestInterceptor(std::make_shared<middlewares::AuthInterceptor>(auth_));
 
+    httpHandler_->addResponseInterceptor(loggingInterceptor);
+
     // Connection provider is created here but the blocking Server runs in run().
     connectionProvider_ = oatpp::network::tcp::server::ConnectionProvider::createShared(
         {settings_.host.c_str(), static_cast<v_uint16>(settings_.port), oatpp::network::Address::IP_4}, true);
 
     server_ = std::make_shared<oatpp::network::Server>(connectionProvider_, httpHandler_);
 
-    logging::logInfo("app", "Routing initialized on " + settings_.host + ":" + std::to_string(settings_.port));
+    logging::logMilestone("app", "Routing initialized on " + settings_.host + ":" + std::to_string(settings_.port));
+
+#ifdef APP_WITH_SWAGGER
+    const std::string swaggerHost = (settings_.host == "0.0.0.0") ? "127.0.0.1" : settings_.host;
+    logging::logMilestone("app", "Swagger UI available at http://" + swaggerHost + ":" +
+                                     std::to_string(settings_.port) + "/swagger/ui");
+#endif  // APP_WITH_SWAGGER
 }
 
 void Application::startTokenCleanup()
@@ -384,7 +396,7 @@ void Application::run()
         return;
     }
 
-    logging::logInfo("app", "Server running");
+    logging::logMilestone("app", "Server running");
 
     // NOTE: websocket upgrades are dispatched through the EchoController using
     // the shared websocketHandler_ component; both handlers serve the same

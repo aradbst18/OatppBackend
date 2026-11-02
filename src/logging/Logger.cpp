@@ -12,6 +12,36 @@
 namespace app::logging
 {
 
+namespace
+{
+thread_local std::string t_currentRequestId;
+}
+
+void RequestContext::setRequestId(const std::string& id) noexcept
+{
+    t_currentRequestId = id;
+}
+
+const std::string& RequestContext::requestId() noexcept
+{
+    return t_currentRequestId;
+}
+
+void RequestContext::clear() noexcept
+{
+    t_currentRequestId.clear();
+}
+
+RequestContext::ScopeGuard::ScopeGuard(const std::string& id) noexcept : previousId_(t_currentRequestId)
+{
+    t_currentRequestId = id;
+}
+
+RequestContext::ScopeGuard::~ScopeGuard()
+{
+    t_currentRequestId = previousId_;
+}
+
 const char* toString(Level level) noexcept
 {
     switch (level)
@@ -28,6 +58,8 @@ const char* toString(Level level) noexcept
             return "ERROR";
         case Level::Critical:
             return "CRITICAL";
+        case Level::Off:
+            return "OFF";
     }
 
     return "UNKNOWN";
@@ -35,14 +67,30 @@ const char* toString(Level level) noexcept
 
 bool tryParseLevel(const std::string& text, Level& out) noexcept
 {
-    std::string upper;
-    upper.reserve(text.size());
-    for (char c : text)
+    std::size_t start = 0;
+    while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])))
     {
-        upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        ++start;
+    }
+    std::size_t end = text.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])))
+    {
+        --end;
     }
 
-    if (upper == "TRACE")
+    if (start >= end)
+    {
+        return false;
+    }
+
+    std::string upper;
+    upper.reserve(end - start);
+    for (std::size_t i = start; i < end; ++i)
+    {
+        upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(text[i]))));
+    }
+
+    if (upper == "TRACE" || upper == "ALL")
     {
         out = Level::Trace;
         return true;
@@ -75,6 +123,12 @@ bool tryParseLevel(const std::string& text, Level& out) noexcept
     if (upper == "CRITICAL" || upper == "FATAL")
     {
         out = Level::Critical;
+        return true;
+    }
+
+    if (upper == "OFF" || upper == "NONE")
+    {
+        out = Level::Off;
         return true;
     }
 
@@ -192,7 +246,13 @@ std::string Logger::resolveLogFilePath(const std::string& dir)
 
 std::string Logger::formatLine(const std::string& time, Level level, const std::string& tag, const std::string& message)
 {
-    return time + " [" + toString(level) + "] [" + tag + "] " + message;
+    const std::string& reqId = RequestContext::requestId();
+    if (reqId.empty())
+    {
+        return time + " [" + toString(level) + "] [" + tag + "] " + message;
+    }
+
+    return time + " [" + toString(level) + "] [req=" + reqId + "] [" + tag + "] " + message;
 }
 
 void Logger::log(Level level, const std::string& tag, const std::string& message)
@@ -217,6 +277,31 @@ void Logger::log(Level level, const std::string& tag, const std::string& message
     if (!dirCopy.empty())
     {
         appendToFile(dirCopy, formatLine(timestamp, level, tag, message));
+    }
+}
+
+void Logger::logMilestone(const std::string& tag, const std::string& message)
+{
+    Sink sinkCopy;
+    std::string dirCopy;
+    bool writeToFile = false;
+    std::string timestamp;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        sinkCopy = sink_;
+        timestamp = currentTimeString();
+        if (!logFileDir_.empty() && static_cast<int>(Level::Info) >= static_cast<int>(minLevel_))
+        {
+            dirCopy = logFileDir_;
+            writeToFile = true;
+        }
+    }
+
+    std::lock_guard<std::recursive_mutex> outputLock(outputMutex_);
+    sinkCopy(Level::Info, tag, message);
+    if (writeToFile)
+    {
+        appendToFile(dirCopy, formatLine(timestamp, Level::Info, tag, message));
     }
 }
 
@@ -267,6 +352,11 @@ void Logger::appendToFile(const std::string& dir, const std::string& line)
 void log(Level level, const std::string& tag, const std::string& message)
 {
     Logger::instance().log(level, tag, message);
+}
+
+void logMilestone(const std::string& tag, const std::string& message)
+{
+    Logger::instance().logMilestone(tag, message);
 }
 
 }  // namespace app::logging

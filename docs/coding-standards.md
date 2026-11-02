@@ -44,9 +44,18 @@ fire only for our code.
 
 - Services throw fine-grained `AppException` subtypes (`request::*`, `authentication::*`, `validation::*`, `database::*`, ...); `AppErrorHandler` preserves their HTTP status and selects fixed public `text/plain` messages. All 5xx bodies are generic. Success uses `createDtoResponse` JSON; errors have no numeric envelope.
 - Exception `what()` text is diagnostic, never a public message. The HTTP handler redacts free-form diagnostics in full and logs the status, error category, and matching `X-Error-Id`. Never put secrets in exceptions, since other internal consumers may log them. Framework errors use the same response policy; only `WWW-Authenticate`, `Allow`, and `Retry-After` are forwarded from framework error headers.
-- Log with levels (`TRACE..CRITICAL`), tags per subsystem, no passwords /
-  JWTs / keys / raw tokens. Oatpp internal logs flow through
-  `OatppLoggerBridge`.
+- Log with ordered levels (`TRACE..CRITICAL`, plus `OFF`), tags per subsystem, no passwords /
+  JWTs / keys / raw tokens. Oatpp internal logs flow through `OatppLoggerBridge`.
+  - `CRITICAL`: Fatal process-terminating errors (startup failure, port bound, schema corrupt).
+  - `ERROR`: Operations that failed completely (5xx server errors, thread unhandled crashes).
+  - `WARN`: Actionable anomalies (rate limits exceeded, failed logins, unencrypted database fallback).
+  - `INFO`: Operational milestones (server running, migrations, user login success, user created).
+  - `DEBUG`: High-level diagnostics and HTTP access logs (`method`, `path`, `status`, `duration_ms`).
+  - `TRACE`: Step-by-step diagnostic execution flow and branch decisions (validation, DB locks, token minting).
+  - `OFF`: Completely silences all logging output for benchmarking or silent test runs.
+- Key application lifecycle milestones (version info, initialization checkpoints, routing address, Swagger UI URL, and server running) use `app::logging::logMilestone()` to guarantee console visibility for operators even when general logging is set to `OFF` or `WARN`, while strictly keeping file output suppressed when logging is disabled.
+- HTTP requests are correlated with a unique `X-Request-Id` header (forwarded or 32-char hex generated)
+  and bound to thread-local `app::logging::RequestContext` so all subsystem logs automatically carry `[req=<id>]`.
 
 ## Security
 

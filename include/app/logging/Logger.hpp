@@ -18,7 +18,30 @@ enum class Level : std::int32_t
     Info = 2,
     Warn = 3,
     Error = 4,
-    Critical = 5
+    Critical = 5,
+    Off = 6
+};
+
+/// Thread-local request correlation context for diagnostic tracing.
+class RequestContext
+{
+public:
+    static void setRequestId(const std::string& id) noexcept;
+    static const std::string& requestId() noexcept;
+    static void clear() noexcept;
+
+    class ScopeGuard
+    {
+    public:
+        explicit ScopeGuard(const std::string& id) noexcept;
+        ~ScopeGuard();
+
+        ScopeGuard(const ScopeGuard&) = delete;
+        ScopeGuard& operator=(const ScopeGuard&) = delete;
+
+    private:
+        std::string previousId_;
+    };
 };
 
 /// Convert a level to its canonical name (e.g. "INFO").
@@ -90,6 +113,12 @@ public:
 
     void log(Level level, const std::string& tag, const std::string& message);
 
+    /// Log a critical application lifecycle milestone.
+    /// Emits to the console sink (bypassing minLevel) so key startup/shutdown
+    /// milestones remain visible on the terminal even when general logging is OFF.
+    /// Emits to file only if file logging is configured and minLevel <= Level::Info.
+    void logMilestone(const std::string& tag, const std::string& message);
+
     bool isEnabled(Level level) const noexcept;
 
 private:
@@ -105,6 +134,8 @@ private:
 };
 
 void log(Level level, const std::string& tag, const std::string& message);
+
+void logMilestone(const std::string& tag, const std::string& message);
 
 inline void logTrace(const std::string& tag, const std::string& message)
 {
@@ -174,3 +205,4 @@ inline void logCritical(const std::string& tag, const std::string& message)
 #define APP_LOG_WARN(tag, expr) APP_LOG(Warn, tag, expr)
 #define APP_LOG_ERROR(tag, expr) APP_LOG(Error, tag, expr)
 #define APP_LOG_CRITICAL(tag, expr) APP_LOG(Critical, tag, expr)
+#define APP_LOG_MILESTONE(tag, expr) ::app::logging::logMilestone((tag), (expr))

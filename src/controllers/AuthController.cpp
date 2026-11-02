@@ -1,6 +1,7 @@
 #include "app/controllers/AuthController.hpp"
 
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 #include "app/middlewares/AuthInterceptor.hpp"
 #include "app/validation/Validators.hpp"
 
@@ -213,6 +214,7 @@ void AuthController::Z__ENDPOINT_ADD_INFO_refresh(const std::shared_ptr<oatpp::w
 
 std::shared_ptr<AuthController::OutgoingResponse> AuthController::login(const oatpp::Object<dto::LoginRequestDto>& body)
 {
+    APP_LOG_TRACE("auth", "AuthController: handling login endpoint");
     // project convention: validate shape by throwing domain exceptions and let
     // `AppErrorHandler` map them to Status + text/plain. Success uses oatpp's
     // `createDtoResponse` (JSON) directly — no custom error envelope.
@@ -238,6 +240,7 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::login(const oa
 std::shared_ptr<AuthController::OutgoingResponse> AuthController::refresh(
     const oatpp::Object<dto::RefreshRequestDto>& body)
 {
+    APP_LOG_TRACE("auth", "AuthController: handling token refresh endpoint");
     if (!body || !body->refreshToken || body->refreshToken->empty())
     {
         throw errors::request::Missing("refresh_token is required");
@@ -259,6 +262,7 @@ std::shared_ptr<AuthController::OutgoingResponse> AuthController::refresh(
 std::shared_ptr<AuthController::OutgoingResponse> AuthController::whoAmI(
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("auth", "AuthController: handling who-am-i probe endpoint");
     try
     {
         // Primary path: typed claims stashed by AuthInterceptor.

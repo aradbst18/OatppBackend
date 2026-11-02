@@ -79,6 +79,19 @@ When running in PostgreSQL mode (`APP_USERS_DATABASE_TYPE=POSTGRESQL`), the appl
 
 Initial provisioning requires `database.path` and its resolved ancestors to be owned by the application account or root. The socket directory must not be writable by group or other users; writable ancestors are accepted only when the sticky bit protects their entries (for example, `/tmp`). Unsafe paths are rejected before writing a password, without changing existing permissions. With a permissive umask, pre-create the socket directory with mode `0700` under trusted parents. These checks apply when creating a cluster; existing clusters keep their current startup behavior.
 
+> [!TIP]
+> **Troubleshooting: "Unsafe initdb password directory"**
+>
+> On Linux distributions using User Private Groups (default `umask 0002`), directories created in your workspace typically receive `0775` permissions (`drwxrwxr-x`, group-writable). If startup fails with:
+> ```text
+> Startup failed [DatabaseConnectionFailed]: Unsafe initdb password directory '...': require application or root ownership and no untrusted write access
+> ```
+> You can resolve this with a single command from the project root to restrict the socket directory and remove group-write permissions on its ancestors:
+> ```bash
+> chmod 700 _data/postgresql && chmod go-w _data . .. ../.. ../../..
+> ```
+> Alternatively, you can configure `database.path` in your config to an owner-only directory under `/tmp` (e.g. `path = "/tmp/oatpp_postgresql"` created via `mkdir -m 700 -p /tmp/oatpp_postgresql`), which passes automatically because `/tmp` has the sticky bit set.
+
 Cleanup covers normal completion and C++ exception unwinding. Forced termination or an operating-system refusal to delete can leave an owner-only password file behind; cleanup warnings identify the path without logging its contents.
 
 ---
@@ -106,6 +119,7 @@ PGDATA="$PGROOT/pgdata"
 PGPORT=5433
 mkdir -p "$PGROOT"
 chmod 700 "$PGROOT"
+chmod go-w _data . .. ../.. ../../..
 ```
 
 If a root-owned empty directory was created beforehand, have its owner assign it

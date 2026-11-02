@@ -102,7 +102,7 @@ on startup.
 TOML, XML, and YAML equivalents live in `configs/app.toml` / `configs/app.xml`
 / `configs/app.yaml` (same groups and leaf names). `database.key` is present
 in encrypted SQLCIPHER and POSTGRESQL files and omitted in plaintext SQLCIPHER
-files (see [`docs/configuration.md`](docs/configuration.md)).
+files (see [`docs/configuration.md`](configuration.md)).
 
 ## CMake configurations
 

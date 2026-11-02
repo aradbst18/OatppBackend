@@ -72,8 +72,7 @@ std::string resolveRuntimeFilePath(const std::string& path)
     return found.empty() ? path : found;
 }
 
-std::string defaultRuntimeFilePath(const std::string& stem, const std::string& extension,
-                                   const std::string& directory)
+std::string defaultRuntimeFilePath(const std::string& stem, const std::string& extension, const std::string& directory)
 {
     const std::filesystem::path dir(directory.empty() ? "_configs" : directory);
     const auto selected = resolveRuntimeFilePath((dir / (stem + "." + extension)).string());

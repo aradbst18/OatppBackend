@@ -49,7 +49,7 @@ void ManagedThread::start()
             [work = work_, name = name_, this]()
             {
                 currentWorker = this;
-                logging::logInfo("threads", "Thread '" + name + "' started");
+                logging::logDebug("threads", "Thread '" + name + "' started");
                 try
                 {
                     work(stopRequested_);

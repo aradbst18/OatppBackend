@@ -182,14 +182,22 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
     const oatpp::web::protocol::http::Status& status, const char* errorName,
     const oatpp::web::protocol::http::Headers& headers, const char* publicText)
 {
-    std::array<unsigned char, 16> bytes{};
-    oatpp::utils::random::Random::randomBytes(bytes.data(), bytes.size());
-    constexpr char hex[] = "0123456789abcdef";
     std::string eventId;
-    for (unsigned char byte : bytes)
+    const std::string& currentReqId = logging::RequestContext::requestId();
+    if (currentReqId.size() == 32 && currentReqId.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
     {
-        eventId += hex[byte >> 4];
-        eventId += hex[byte & 15];
+        eventId = currentReqId;
+    }
+    else
+    {
+        std::array<unsigned char, 16> bytes{};
+        oatpp::utils::random::Random::randomBytes(bytes.data(), bytes.size());
+        constexpr char hex[] = "0123456789abcdef";
+        for (unsigned char byte : bytes)
+        {
+            eventId += hex[byte >> 4];
+            eventId += hex[byte & 15];
+        }
     }
 
     auto response = createTextError(oatpp::web::protocol::http::Status(status.code, ""),
@@ -203,11 +211,26 @@ std::shared_ptr<oatpp::web::protocol::http::outgoing::Response> AppErrorHandler:
         }
     }
     response->putOrReplaceHeader("X-Error-Id", eventId);
+    response->putOrReplaceHeader("X-Request-Id", eventId);
 
     // Free-form exception text can contain credentials or SQL values; redact it in full.
     try
     {
-        logging::log(status.code >= 500 ? logging::Level::Error : logging::Level::Warn, "error",
+        logging::Level level = logging::Level::Debug;
+        if (status.code >= 500)
+        {
+            level = logging::Level::Error;
+        }
+        else if (status.code == 401 || status.code == 403 || status.code == 429)
+        {
+            level = logging::Level::Warn;
+        }
+        else
+        {
+            level = logging::Level::Debug;
+        }
+
+        logging::log(level, "error",
                      "event=" + eventId + " status=" + std::to_string(status.code) + " code=" + errorName +
                          " diagnostic=[redacted]");
     }

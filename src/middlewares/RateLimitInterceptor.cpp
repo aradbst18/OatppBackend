@@ -7,6 +7,7 @@
 #include "oatpp/network/tcp/server/ConnectionProvider.hpp"
 
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 
 namespace app::middlewares
 {
@@ -154,8 +155,11 @@ std::shared_ptr<RateLimitInterceptor::OutgoingResponse> RateLimitInterceptor::in
     }
 
     const auto ip = extractClientIp(request);
+    const std::string clientIp = ip ? *ip : "unknown";
+    APP_LOG_TRACE("ratelimit", "Checking rate limit for " + endpoint + " from ip '" + clientIp + "'");
     if (!ip || !checkAllowed(endpoint + ":" + *ip))
     {
+        APP_LOG_WARN("ratelimit", "Rate limit exceeded for " + endpoint + " from ip '" + clientIp + "'");
         throw errors::ratelimit::Exceeded("Rate limit exceeded for " + endpoint);
     }
 

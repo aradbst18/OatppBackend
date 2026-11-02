@@ -59,6 +59,7 @@ add_library(
     src/controllers/EchoController.cpp
     src/middlewares/AuthInterceptor.cpp
     src/middlewares/CorsInterceptor.cpp
+    src/middlewares/LoggingInterceptor.cpp
     src/middlewares/RateLimitInterceptor.cpp
     src/websocket/EchoListener.cpp
     src/application/TerminateHandler.cpp

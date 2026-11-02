@@ -68,6 +68,26 @@ The `REPLACE_ME` values above are placeholders and are rejected at startup.
 Use generated secrets for a new installation, or the matching private database
 key/password and a unique JWT secret for an existing installation.
 
+### Parameter Reference Table
+
+| Group | Leaf Key | C++ Field | Type | Default | Allowed Values / Range | Description & Applicability |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `server` | `host` | `host` | String | `"127.0.0.1"` | Non-empty string | Network IP address or hostname to bind. |
+| `server` | `port` | `port` | Integer | `8080` | `1 .. 65535` (`uint16`) | TCP port for HTTP/WebSocket server. Must be non-zero. |
+| `server` | `trustedProxies` | `trustedProxies` | String | `""` | Comma-separated literal IPs or empty | Proxies trusted for `X-Forwarded-For`. Hostnames and CIDRs rejected. |
+| `server` | `corsAllowedOrigins` | `corsAllowedOrigins` | String | `"*"` | `"*"` or comma-separated HTTP(S) origins | Allowed CORS origins. Trailing slashes, queries, and mixed wildcards rejected. |
+| `database` | `path` | `databasePath` | String | SQLCipher: `"_data/app.db"`<br>PostgreSQL: `"_data/postgresql"` | Non-empty path | SQLCipher: database file path (`":memory:"` in tests).<br>PostgreSQL: Unix socket directory. |
+| `database` | `key` | `databaseKey` | String | Auto-generated (32 random bytes) | Non-empty password (PostgreSQL); key or `""` (SQLCipher) | Database encryption key or PostgreSQL SCRAM password. Sample secrets rejected. |
+| `database` | `port` | `databasePort` | Integer | `5433` | `1 .. 65535` (`uint16`) | PostgreSQL server port (PostgreSQL builds only). Must be non-zero. |
+| `database` | `name` | `databaseName` | String | `"oatpp_backend"` | Non-empty string | Target database name (PostgreSQL builds only). |
+| `database` | `user` | `databaseUser` | String | `"oatpp_tester"` | Non-empty string | Target role name (PostgreSQL builds only). |
+| `jwt` | `secret` | `jwtSecret` | String | Auto-generated (32 random bytes) | Length $\ge 32$ characters | HMAC-SHA256 signature secret. Sample secrets rejected. |
+| `jwt` | `issuer` | `jwtIssuer` | String | `"oatpp-backend"` | Non-empty string | Expected `iss` claim in JWT access/refresh tokens. |
+| `jwt` | `ttlSeconds` | `jwtTtlSeconds` | Integer | `3600` | Strictly positive ($> 0$, `int64`) | Access token validity lifetime in seconds. |
+| `logging` | `level` | `logLevel` | String | `"INFO"` | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`, `OFF` | Minimum emitted severity. Case-insensitive; synonyms `ALL`, `WARNING`, `FATAL`, `NONE`. |
+| `logging` | `path` | `logPath` | String | `"_logs"` | Directory path or `""` | Directory for daily log files (`<dir>/yyyy-mm-dd.log`). Empty disables file logging. |
+| `swagger` | `resPath` | `swaggerResPath` | String | `OATPP_SWAGGER_RES_PATH` | Non-empty directory path | Directory for Swagger UI static assets (`APP_WITH_SWAGGER` only). |
+
 Leaf mapping: `host`/`port`/`trustedProxies`/`corsAllowedOrigins`, `database.path` (`databasePath`: file path
 for SQLCIPHER, e.g. `_data/app.db`, or Unix socket dir for
 POSTGRESQL, e.g. `_data/postgresql` per [`docs/postgresql.md`](postgresql.md)),
@@ -273,10 +293,12 @@ secrets).
 { "logging": {"path": "_logs"} }
 ```
 
+- `logging.level` accepts `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `CRITICAL`, or `OFF`
+  (case-insensitive, e.g. `trace`, `Trace`, `TRACE`; synonyms: `ALL` for `TRACE`, `NONE` for `OFF`). Default is `INFO`.
 - The active file is `<dir>/yyyy-mm-dd.log` (local date), resolved on every
   write, so a new file starts automatically at midnight.
-- Every line starts with `HH:MM:SS.milliseconds`, then level, tag, message:
-  `14:03:22.041 [INFO] [auth] Login succeeded for user 'admin'`.
+- Every line starts with `HH:MM:SS.milliseconds`, then level, optional request correlation ID, tag, message:
+  `14:03:22.041 [INFO] [req=3e0b1f...] [auth] Login succeeded for user 'admin'`.
   Console/stderr output uses the same line format.
 - Empty `path` (`""`) disables file logging (console only).
 - The directory is created on demand; unwritable locations fall back to a
@@ -336,3 +358,23 @@ completed from the current build info, and wrong types or invalid values
 abort startup with a critical error for the operator to fix
 (`version` must be `x.y.z`, `releaseDate` `yyyy-mm-dd`, `startupTime`
 `HH:MM:SS`).
+
+## Command-line options
+
+The server binary accepts the following command-line flags:
+
+| Option | Argument | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--config` | `<path>` | Path to the configuration file (syntax matches compile-time `APP_CONFIG_FORMAT`). | `_configs/app.<format>` |
+| `--version-file` | `<path>` | Explicit path to the runtime version file. | Colocated with `--config` |
+| `--help`, `-h` | None | Print command-line usage information and exit with code 0. | N/A |
+
+## Environment variables
+
+The application reads the following optional environment variables:
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `APP_SEED_ADMIN_USERNAME` | Username for the bootstrap administrator account during initial database seeding. | `"admin"` |
+| `APP_SEED_ADMIN_PASSWORD` | Password for the bootstrap administrator account during initial database seeding. | None (generated or interactive) |
+| `OATPP_SWAGGER_RES_PATH` | Directory path override for Swagger UI static resources (index.html, *.js, *.css). | `swagger.resPath` from config |
