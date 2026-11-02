@@ -11,7 +11,9 @@
 #include <thread>
 #include <vector>
 
+#include "oatpp/web/protocol/http/outgoing/ResponseFactory.hpp"
 #include "app/logging/Logger.hpp"
+#include "app/middlewares/LoggingInterceptor.hpp"
 
 using namespace app;
 
@@ -290,4 +292,270 @@ TEST_CASE("logging: sinks can access configuration and emit a nested log")
     EXPECT_EQ(messages.size(), std::size_t{2});
     EXPECT_EQ(messages[0], std::string("outer"));
     EXPECT_EQ(messages[1], std::string("inner"));
+}
+
+TEST_CASE("logging: parse Level::Off and ALL/NONE synonyms")
+{
+    logging::Level level = logging::Level::Info;
+
+    EXPECT_TRUE(logging::tryParseLevel("OFF", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+    EXPECT_EQ(std::string(logging::toString(level)), std::string("OFF"));
+
+    EXPECT_TRUE(logging::tryParseLevel("none", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+
+    EXPECT_TRUE(logging::tryParseLevel("ALL", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+
+    EXPECT_TRUE(logging::tryParseLevel("trace", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+    EXPECT_EQ(std::string(logging::toString(level)), std::string("TRACE"));
+}
+
+TEST_CASE("logging: tryParseLevel is case-insensitive and trims whitespace")
+{
+    logging::Level level{};
+
+    // Variations of TRACE
+    EXPECT_TRUE(logging::tryParseLevel("TRACE", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+    EXPECT_TRUE(logging::tryParseLevel("Trace", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+    EXPECT_TRUE(logging::tryParseLevel("trace", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+    EXPECT_TRUE(logging::tryParseLevel("tRaCe", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+    EXPECT_TRUE(logging::tryParseLevel("  trace  ", level));
+    EXPECT_TRUE(level == logging::Level::Trace);
+
+    // Variations of DEBUG
+    EXPECT_TRUE(logging::tryParseLevel("debug", level));
+    EXPECT_TRUE(level == logging::Level::Debug);
+    EXPECT_TRUE(logging::tryParseLevel("Debug", level));
+    EXPECT_TRUE(level == logging::Level::Debug);
+    EXPECT_TRUE(logging::tryParseLevel("DEBUG", level));
+    EXPECT_TRUE(level == logging::Level::Debug);
+
+    // Variations of INFO
+    EXPECT_TRUE(logging::tryParseLevel("info", level));
+    EXPECT_TRUE(level == logging::Level::Info);
+    EXPECT_TRUE(logging::tryParseLevel("Info", level));
+    EXPECT_TRUE(level == logging::Level::Info);
+
+    // Variations of WARN / WARNING
+    EXPECT_TRUE(logging::tryParseLevel("warn", level));
+    EXPECT_TRUE(level == logging::Level::Warn);
+    EXPECT_TRUE(logging::tryParseLevel("Warn", level));
+    EXPECT_TRUE(level == logging::Level::Warn);
+    EXPECT_TRUE(logging::tryParseLevel("warning", level));
+    EXPECT_TRUE(level == logging::Level::Warn);
+    EXPECT_TRUE(logging::tryParseLevel("Warning", level));
+    EXPECT_TRUE(level == logging::Level::Warn);
+
+    // Variations of ERROR
+    EXPECT_TRUE(logging::tryParseLevel("error", level));
+    EXPECT_TRUE(level == logging::Level::Error);
+    EXPECT_TRUE(logging::tryParseLevel("Error", level));
+    EXPECT_TRUE(level == logging::Level::Error);
+
+    // Variations of CRITICAL / FATAL
+    EXPECT_TRUE(logging::tryParseLevel("critical", level));
+    EXPECT_TRUE(level == logging::Level::Critical);
+    EXPECT_TRUE(logging::tryParseLevel("Critical", level));
+    EXPECT_TRUE(level == logging::Level::Critical);
+    EXPECT_TRUE(logging::tryParseLevel("fatal", level));
+    EXPECT_TRUE(level == logging::Level::Critical);
+
+    // Variations of OFF / NONE
+    EXPECT_TRUE(logging::tryParseLevel("off", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+    EXPECT_TRUE(logging::tryParseLevel("Off", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+    EXPECT_TRUE(logging::tryParseLevel("OFF", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+    EXPECT_TRUE(logging::tryParseLevel("none", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+    EXPECT_TRUE(logging::tryParseLevel("None", level));
+    EXPECT_TRUE(level == logging::Level::Off);
+
+    // Invalid values
+    EXPECT_FALSE(logging::tryParseLevel("", level));
+    EXPECT_FALSE(logging::tryParseLevel("   ", level));
+    EXPECT_FALSE(logging::tryParseLevel("unknown", level));
+    EXPECT_FALSE(logging::tryParseLevel("123", level));
+}
+
+TEST_CASE("logging: Level::Off silences all levels including Critical")
+{
+    LoggerGuard guard;
+    auto& logger = logging::Logger::instance();
+
+    std::vector<std::string> messages;
+    logger.configure(logging::Level::Off,
+                     [&](logging::Level, const std::string&, const std::string& msg)
+                     {
+                         messages.push_back(msg);
+                     });
+
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Trace));
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Debug));
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Info));
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Warn));
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Error));
+    EXPECT_FALSE(logger.isEnabled(logging::Level::Critical));
+
+    logging::logTrace("test", "trace line");
+    logging::logDebug("test", "debug line");
+    logging::logInfo("test", "info line");
+    logging::logWarn("test", "warn line");
+    logging::logError("test", "error line");
+    logging::logCritical("test", "critical line");
+
+    EXPECT_TRUE(messages.empty());
+}
+
+TEST_CASE("logging: RequestContext ScopeGuard attaches request id to log line")
+{
+    // Without active request context
+    EXPECT_EQ(logging::Logger::formatLine("10:00:00.000", logging::Level::Info, "auth", "ready"),
+              std::string("10:00:00.000 [INFO] [auth] ready"));
+
+    {
+        logging::RequestContext::ScopeGuard guard("req-abc12345");
+        EXPECT_EQ(logging::RequestContext::requestId(), std::string("req-abc12345"));
+        EXPECT_EQ(logging::Logger::formatLine("10:00:00.000", logging::Level::Info, "auth", "ready"),
+                  std::string("10:00:00.000 [INFO] [req=req-abc12345] [auth] ready"));
+
+        {
+            logging::RequestContext::ScopeGuard nested("req-suboperation");
+            EXPECT_EQ(logging::RequestContext::requestId(), std::string("req-suboperation"));
+            EXPECT_EQ(logging::Logger::formatLine("10:00:00.001", logging::Level::Trace, "db", "query"),
+                      std::string("10:00:00.001 [TRACE] [req=req-suboperation] [db] query"));
+        }
+
+        // Restores outer scope on exit
+        EXPECT_EQ(logging::RequestContext::requestId(), std::string("req-abc12345"));
+    }
+
+    // Completely cleared on outer exit
+    EXPECT_TRUE(logging::RequestContext::requestId().empty());
+    EXPECT_EQ(logging::Logger::formatLine("10:00:00.002", logging::Level::Info, "auth", "done"),
+              std::string("10:00:00.002 [INFO] [auth] done"));
+}
+
+TEST_CASE("logging: LoggingInterceptor generates request id and attaches to response")
+{
+    LoggerGuard guard;
+    auto interceptor = std::make_shared<middlewares::LoggingInterceptor>();
+
+    std::vector<std::pair<logging::Level, std::string>> logs;
+    logging::Logger::instance().configure(logging::Level::Trace,
+                                          [&](logging::Level lvl, const std::string&, const std::string& msg)
+                                          {
+                                              logs.emplace_back(lvl, msg);
+                                          });
+
+    oatpp::web::protocol::http::RequestStartingLine line;
+    line.method = "GET";
+    line.path = "/api/v1/health";
+    line.protocol = "HTTP/1.1";
+    auto request = middlewares::LoggingInterceptor::IncomingRequest::createShared(
+        nullptr, line, oatpp::web::protocol::http::Headers(), nullptr, nullptr);
+
+    // Intercept request
+    auto earlyResponse = interceptor->intercept(request);
+    EXPECT_FALSE(earlyResponse);
+    EXPECT_FALSE(logging::RequestContext::requestId().empty());
+    const std::string generatedId = logging::RequestContext::requestId();
+    EXPECT_EQ(generatedId.size(), 32u);
+
+    // Create response and intercept response
+    auto response = oatpp::web::protocol::http::outgoing::ResponseFactory::createResponse(
+        oatpp::web::protocol::http::Status::CODE_200, "OK");
+    auto finalResponse = interceptor->intercept(request, response);
+    EXPECT_TRUE(finalResponse);
+    EXPECT_TRUE(finalResponse->getHeader("X-Request-Id"));
+    EXPECT_EQ(*finalResponse->getHeader("X-Request-Id"), generatedId);
+
+    // Context cleared after response interception
+    EXPECT_TRUE(logging::RequestContext::requestId().empty());
+
+    // Verify incoming TRACE and outgoing DEBUG logs were emitted
+    bool foundTrace = false;
+    bool foundDebug = false;
+    for (const auto& entry : logs)
+    {
+        if (entry.first == logging::Level::Trace && entry.second.find("--> GET /api/v1/health") != std::string::npos)
+        {
+            foundTrace = true;
+        }
+        if (entry.first == logging::Level::Debug &&
+            entry.second.find("<-- GET /api/v1/health status=200") != std::string::npos)
+        {
+            foundDebug = true;
+        }
+    }
+    EXPECT_TRUE(foundTrace);
+    EXPECT_TRUE(foundDebug);
+}
+
+TEST_CASE("logging: milestone bypasses console minLevel when OFF but skips file writing")
+{
+    LoggerGuard guard;
+    const std::string dir = "/tmp/oatpp_test_logging_milestone_off_" +
+                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::remove_all(dir);
+
+    std::vector<std::pair<logging::Level, std::string>> sinkCalls;
+    logging::Logger::instance().configure(logging::Level::Off,
+                                          [&](logging::Level lvl, const std::string& tag, const std::string& msg)
+                                          {
+                                              sinkCalls.emplace_back(lvl, "[" + tag + "] " + msg);
+                                          });
+    logging::Logger::instance().setLogFileDirectory(dir);
+
+    // Regular logs must be completely suppressed
+    logging::logInfo("app", "Standard info should be silent");
+    logging::logWarn("app", "Standard warn should be silent");
+    EXPECT_EQ(sinkCalls.size(), 0u);
+
+    // Milestone must reach the console sink
+    logging::logMilestone("app", "Server running");
+    EXPECT_EQ(sinkCalls.size(), 1u);
+    EXPECT_TRUE(sinkCalls[0].first == logging::Level::Info);
+    EXPECT_EQ(sinkCalls[0].second, std::string("[app] Server running"));
+
+    // File output must NOT be written when minLevel is Off
+    const std::string logFile = logging::Logger::resolveLogFilePath(dir);
+    EXPECT_FALSE(std::filesystem::exists(logFile));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("logging: milestone writes to file when minLevel is INFO or lower")
+{
+    LoggerGuard guard;
+    const std::string dir = "/tmp/oatpp_test_logging_milestone_info_" +
+                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    std::filesystem::remove_all(dir);
+
+    std::vector<std::string> sinkCalls;
+    logging::Logger::instance().configure(logging::Level::Info,
+                                          [&](logging::Level, const std::string&, const std::string& msg)
+                                          {
+                                              sinkCalls.push_back(msg);
+                                          });
+    logging::Logger::instance().setLogFileDirectory(dir);
+
+    logging::logMilestone("app", "Services initialized");
+    EXPECT_EQ(sinkCalls.size(), 1u);
+    EXPECT_EQ(sinkCalls[0], std::string("Services initialized"));
+
+    const std::string logFile = logging::Logger::resolveLogFilePath(dir);
+    EXPECT_TRUE(std::filesystem::exists(logFile));
+    const std::string content = readWholeFile(logFile);
+    EXPECT_TRUE(content.find("[INFO] [app] Services initialized") != std::string::npos);
+
+    std::filesystem::remove_all(dir);
 }

@@ -353,6 +353,17 @@ TEST_CASE("config: validation rejects bad values")
     s = validSettings();
     s.logLevel = "NOPE";
     EXPECT_FALSE(s.validate().empty());
+
+    // Case-insensitive logLevel validation in AppSettings
+    for (const char* variant :
+         {"trace",    "Trace", "TRACE", "tRaCe", "debug", "Debug", "DEBUG",    "info",     "Info",
+          "INFO",     "warn",  "Warn",  "WARN",  "error", "Error", "ERROR",    "critical", "Critical",
+          "CRITICAL", "off",   "Off",   "OFF",   "all",   "none",  "  trace  "})
+    {
+        s = validSettings();
+        s.logLevel = variant;
+        EXPECT_TRUE(s.validate().empty());
+    }
 }
 
 TEST_CASE("config: all formats validate ports before narrowing")
