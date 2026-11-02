@@ -2,6 +2,8 @@
 
 #include "oatpp-websocket/Handshaker.hpp"
 
+#include "app/logging/Logger.hpp"
+
 namespace app::controllers
 {
 
@@ -122,12 +124,15 @@ No authentication, no request body, no JSON — just the upgrade headers above.)
 std::shared_ptr<EchoController::OutgoingResponse> EchoController::wsEcho(
     const std::shared_ptr<IncomingRequest>& request)
 {
+    APP_LOG_TRACE("websocket", "Handling /ws/echo handshake request");
     const auto upgrade = request->getHeader("Upgrade");
     if (!upgrade || std::string(upgrade->c_str()) != "websocket")
     {
+        APP_LOG_DEBUG("websocket", "Rejected GET /ws/echo: missing or invalid Upgrade header");
         return createResponse(Status::CODE_400, "Expected WebSocket upgrade");
     }
 
+    APP_LOG_TRACE("websocket", "Switching protocols: completing WebSocket handshake");
     return oatpp::websocket::Handshaker::serversideHandshake(request->getHeaders(), websocketHandler_);
 }
 

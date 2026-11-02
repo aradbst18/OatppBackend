@@ -61,7 +61,7 @@ std::string AuthService::ensureSeeded(const std::string& customUsername, const s
             throw errors::config::Invalid("Bootstrap account must be an administrator with a stored password hash");
         }
 
-        logging::logInfo("auth", "Admin account '" + seedUser + "' already present; database ready");
+        logging::logDebug("auth", "Admin account '" + seedUser + "' already present; database ready");
         return seedUser;
     }
 
@@ -100,6 +100,7 @@ std::string AuthService::ensureSeeded(const std::string& customUsername, const s
 
 LoginResult AuthService::login(const std::string& username, const std::string& password)
 {
+    APP_LOG_TRACE("auth", "Validating login credential format for '" + username + "'");
     // Login must accept existing credentials independently of the new-password policy.
     if (!validation::isValidUsername(username))
     {
@@ -111,6 +112,7 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
         throw errors::validation::InvalidValue("Login password must contain 1-512 bytes");
     }
 
+    APP_LOG_TRACE("auth", "Starting user record query and row lock in transaction");
     auto transaction = users_->beginTransaction();
     users_->lockUserByUsername(username);
     oatpp::Object<repositories::UserDto> record;
@@ -123,11 +125,13 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
         // Unknown user and wrong password look identical (see below).
     }
 
+    APP_LOG_TRACE("auth", "Verifying credentials with constant-time password comparator");
     // Constant-shape failure: an unknown user, a wrong password and an
     // incomplete row all fail the same way.
     if (!record || !record->username || !record->passwordHash || !record->role ||
         !auth::passwordVerify(password, record->passwordHash->c_str()))
     {
+        APP_LOG_WARN("auth", "Login authentication failed for user '" + username + "': invalid credentials");
         throw errors::authentication::InvalidCredentials("Invalid credentials");
     }
 
@@ -136,9 +140,12 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
     result.role = *record->role;
     result.accessToken = jwt_->create(*record->id, result.role, record->sessionVersion.getValue(-1));
     result.expiresInSeconds = jwt_->ttl().count();
+    APP_LOG_TRACE("auth", "Minting JWT access token (role: " + result.role +
+                              ", ttl: " + std::to_string(result.expiresInSeconds) + "s)");
 
     if (refreshTokens_)
     {
+        APP_LOG_TRACE("auth", "Persisting cryptographically secure refresh token");
         const std::string refreshToken = generateRefreshToken();
         const auto now = std::chrono::system_clock::now();
         const auto nowSeconds = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -161,6 +168,7 @@ LoginResult AuthService::login(const std::string& username, const std::string& p
 
 LoginResult AuthService::refresh(const std::string& refreshToken)
 {
+    APP_LOG_TRACE("auth", "Validating refresh token candidate");
     if (refreshToken.empty())
     {
         throw errors::request::Missing("refresh_token is required");
@@ -227,6 +235,7 @@ LoginResult AuthService::refresh(const std::string& refreshToken)
         throw errors::authentication::InvalidToken("Account sessions have been invalidated");
     }
 
+    APP_LOG_TRACE("auth", "Revoking old refresh token and generating replacement");
     // Both revocation and replacement roll back if any later step fails.
     refreshTokens_->revokeToken(oatpp::String(refreshToken));
 
@@ -261,6 +270,7 @@ std::string AuthService::generateRefreshToken() const
 
 LoginResult AuthService::whoAmI(const auth::TokenClaims& claims)
 {
+    APP_LOG_TRACE("auth", "Checking account status for subject '" + claims.subject + "'");
     oatpp::Object<repositories::UserDto> account;
     try
     {
@@ -283,6 +293,7 @@ LoginResult AuthService::whoAmI(const auth::TokenClaims& claims)
 
 auth::TokenClaims AuthService::authenticate(const std::string& accessToken)
 {
+    APP_LOG_TRACE("auth", "Verifying access token signature and claims");
     auto claims = jwt_->verify(accessToken);
     // Authorization keeps using the signed role, whose lifetime is bounded by
     // session_version. Every role write increments that version atomically.

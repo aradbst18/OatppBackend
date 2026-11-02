@@ -96,17 +96,22 @@ void EchoListener::readMessage(const WebSocket& socket, v_uint8 opcode, p_char8 
 
     const auto message = buffer_.toString();
     buffer_.reset();
+    APP_LOG_TRACE("websocket",
+                  "Processing complete WebSocket frame (" + std::to_string(message ? message->size() : 0) + " bytes)");
     if (opcode == oatpp::websocket::Frame::OPCODE_TEXT)
     {
         if (!isValidUtf8(*message))
         {
             closeWithError(socket, 1007, "Invalid UTF-8 text");
         }
-        logging::logDebug("websocket", "Echoing text message");
+        logging::logDebug("websocket",
+                          "Echoing text message (" + std::to_string(message ? message->size() : 0) + " bytes)");
         socket.sendOneFrameText("Server echo: " + *message);
     }
     else
     {
+        logging::logDebug("websocket",
+                          "Echoing binary message (" + std::to_string(message ? message->size() : 0) + " bytes)");
         socket.sendOneFrameBinary(message);
     }
 }

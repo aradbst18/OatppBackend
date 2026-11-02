@@ -5,6 +5,7 @@
 #include "app/auth/PasswordHash.hpp"
 #include "app/domain/UserRole.hpp"
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 #include "app/repositories/UserDto.hpp"
 #include "app/repositories/UserRepository.hpp"
 #include "app/validation/Validators.hpp"
@@ -45,6 +46,7 @@ void UserService::validateCreateInput(const CreateUserInput& input)
 
 UserInfo UserService::getUser(const std::string& username)
 {
+    APP_LOG_TRACE("users", "Looking up user '" + username + "' in repository");
     if (username.empty())
     {
         throw errors::validation::InvalidValue("Username is required");
@@ -61,6 +63,7 @@ UserInfo UserService::getUser(const std::string& username)
 
 std::vector<UserInfo> UserService::listUsers()
 {
+    APP_LOG_TRACE("users", "Listing all users from repository");
     const auto rows = users_->listUsers();
 
     std::vector<UserInfo> result;
@@ -77,11 +80,13 @@ std::vector<UserInfo> UserService::listUsers()
         }
     }
 
+    APP_LOG_DEBUG("users", "Listed " + std::to_string(result.size()) + " users from repository");
     return result;
 }
 
 UserInfo UserService::createUser(const CreateUserInput& input)
 {
+    APP_LOG_TRACE("users", "Validating new user creation input for '" + input.username + "'");
     validateCreateInput(input);
 
     if (users_->isUserExists(input.username))
@@ -89,6 +94,7 @@ UserInfo UserService::createUser(const CreateUserInput& input)
         throw errors::database::Conflict("User '" + input.username + "' already exists");
     }
 
+    APP_LOG_TRACE("users", "Hashing password and creating user record in repository");
     auto userDto = oatpp::Object<repositories::UserDto>::createShared();
     userDto->username = input.username;
     userDto->passwordHash = auth::passwordHash(input.password);
@@ -100,11 +106,13 @@ UserInfo UserService::createUser(const CreateUserInput& input)
     info.username = input.username;
     info.role = input.role;
 
+    logging::logInfo("users", "Created user '" + input.username + "' with role '" + input.role + "'");
     return info;
 }
 
 std::vector<UserInfo> UserService::createUsers(const std::vector<CreateUserInput>& inputs)
 {
+    APP_LOG_TRACE("users", "Batch creating " + std::to_string(inputs.size()) + " users in transaction");
     if (inputs.empty())
     {
         throw errors::validation::InvalidValue("User list must not be empty");
@@ -125,11 +133,13 @@ std::vector<UserInfo> UserService::createUsers(const std::vector<CreateUserInput
     }
 
     transaction.commit();
+    logging::logInfo("users", "Batch created " + std::to_string(created.size()) + " users");
     return created;
 }
 
 UserInfo UserService::updateUser(const std::string& currentUsername, const UpdateUserInput& input)
 {
+    APP_LOG_TRACE("users", "Updating user '" + currentUsername + "' in transaction");
     if (currentUsername.empty())
     {
         throw errors::request::Missing("Current username is required");
@@ -188,11 +198,13 @@ UserInfo UserService::updateUser(const std::string& currentUsername, const Updat
 
     const auto result = getUser(input.username);
     transaction.commit();
+    logging::logInfo("users", "Updated user '" + currentUsername + "' (new username: '" + input.username + "')");
     return result;
 }
 
 UserInfo UserService::patchUser(const std::string& currentUsername, const PatchUserInput& input)
 {
+    APP_LOG_TRACE("users", "Patching user '" + currentUsername + "' in transaction");
     if (currentUsername.empty())
     {
         throw errors::request::Missing("Current username is required");
@@ -255,11 +267,13 @@ UserInfo UserService::patchUser(const std::string& currentUsername, const PatchU
                                       input.role ? oatpp::String(*input.role) : current->role);
     const auto result = getUser(targetUsername);
     transaction.commit();
+    logging::logInfo("users", "Patched user '" + currentUsername + "' successfully");
     return result;
 }
 
 void UserService::deleteUser(const std::string& username)
 {
+    APP_LOG_TRACE("users", "Deleting user '" + username + "' from repository");
     if (username.empty())
     {
         throw errors::validation::InvalidValue("Username is required");
@@ -276,16 +290,19 @@ void UserService::deleteUser(const std::string& username)
     }
 
     users_->deleteUser(username);
+    logging::logInfo("users", "Deleted user '" + username + "' successfully");
 }
 
 DeleteUsersResult UserService::deleteAllUsers()
 {
+    APP_LOG_WARN("users", "Deleting all non-admin users except '" + defaultAdminUsername_ + "'");
     const std::int64_t count = users_->deleteUsersExcept(defaultAdminUsername_);
 
     DeleteUsersResult result;
     result.deletedCount = count;
     result.message = "All users deleted except default admin user ('" + defaultAdminUsername_ + "')";
 
+    logging::logInfo("users", "Deleted " + std::to_string(count) + " non-admin users");
     return result;
 }
 

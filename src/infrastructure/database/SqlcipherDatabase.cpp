@@ -167,7 +167,7 @@ void SqlcipherDatabase::open()
     isOpen_.store(true);
     if (!key_.empty())
     {
-        logging::logInfo("database", "Encrypted file backend opened (key applied, not logged)");
+        logging::logDebug("database", "Encrypted file backend opened (key applied, not logged)");
     }
 }
 

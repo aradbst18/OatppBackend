@@ -3,6 +3,7 @@
 #include "app/auth/JwtService.hpp"
 #include "app/dto/AuthDtos.hpp"
 #include "app/errors/AppException.hpp"
+#include "app/logging/Logger.hpp"
 
 namespace app::middlewares
 {
@@ -53,9 +54,11 @@ std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(
 
     if (isPublicPath(method, path))
     {
+        APP_LOG_TRACE("auth", "Path '" + path + "' is public; bypassing auth check");
         return nullptr;  // continue down the chain
     }
 
+    APP_LOG_TRACE("auth", "Authenticating request for " + method + " " + path);
     const auto authHeader = request->getHeader("Authorization");
     const std::string header = authHeader ? authHeader->c_str() : "";
 
@@ -63,6 +66,8 @@ std::shared_ptr<AuthInterceptor::OutgoingResponse> AuthInterceptor::intercept(
     // map them to 401 text/plain. No JSON envelope here.
     const std::string token = auth::JwtService::extractBearer(header);
     const auth::TokenClaims claims = authService_->authenticate(token);
+
+    APP_LOG_TRACE("auth", "Token verified for user '" + claims.subject + "' (role: " + claims.role + ")");
 
     // Stash verified claims in request bundle as a typed DTO.
     auto claimsDto = dto::AuthClaimsDto::createShared();
