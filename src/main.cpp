@@ -129,7 +129,7 @@ int main(int argc, char** argv)
 
     try
     {
-        app::logging::logInfo("main", std::string("Active config format: ") + app::config::activeFormatName());
+        app::logging::logDebug("main", std::string("Active config format: ") + app::config::activeFormatName());
 
         if (!missing.empty())
         {
@@ -145,7 +145,7 @@ int main(int argc, char** argv)
                 joined += (joined.empty() ? "" : ", ") + name;
             }
 
-            app::logging::logInfo("main", "Completed missing configuration parameters with defaults: " + joined);
+            app::logging::logDebug("main", "Completed missing configuration parameters with defaults: " + joined);
         }
 
         // 4)-7) Database, REST/Oatpp, server; failures use the normal log.

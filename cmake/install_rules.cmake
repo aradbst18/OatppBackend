@@ -1,8 +1,8 @@
 # Install rules for OatppBackend.
 #
 # Layout: `bin/oatpp-backend` plus, only when APP_ENABLE_SWAGGER=ON, `share/swagger-res/` (Swagger UI assets). No config
-# or version files are installed: the app creates `_configs/app.<format>` from defaults on first startup when missing (see
-# Application::loadSettingsOrDefaults) and rewrites `_configs/version.<format>` on every startup (see
+# or version files are installed: the app creates `_configs/app.<format>` from defaults on first startup when missing
+# (see Application::loadSettingsOrDefaults) and rewrites `_configs/version.<format>` on every startup (see
 # Application::initInfrastructure). The checked-in `configs/app.{json,toml,xml,yaml}` are samples; installing all four
 # would ship dead weight, mostly in the wrong format for the active build.
 #

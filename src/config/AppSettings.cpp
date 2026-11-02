@@ -251,7 +251,7 @@ std::string AppSettings::validate() const
     logging::Level level{};
     if (!logging::tryParseLevel(logLevel, level))
     {
-        return "logLevel must be one of TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL";
+        return "logLevel must be one of TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL/OFF";
     }
 
 #ifdef APP_WITH_SWAGGER
